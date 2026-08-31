@@ -41,7 +41,7 @@
 <div class="movil">
   <header>
     <div class="logo">🌿 FloraScan</div>
-    <span class="badge">v4.1</span>
+    <span class="badge">v4.2</span>
   </header>
   <h1>Hola 👋</h1>
   <p class="sub">Escanea una planta para identificarla y conocer su salud.</p>
@@ -87,8 +87,9 @@
 let stream = null;
 const video = document.getElementById('video');
 
-// En móvil ocultamos la cámara en vivo (requiere https); "Subir foto" abre el selector nativo
-if (/Android|iPhone|iPad/i.test(navigator.userAgent)) {
+// Oculta "Usar cámara" SOLO si el navegador no soporta cámara
+// (sin HTTPS o navegador antiguo). En Render (HTTPS) el móvil SÍ la verá.
+if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
   document.getElementById('btnCamara').style.display = 'none';
 }
 
@@ -161,10 +162,10 @@ function pintar(d){
   const lo = d.especie.local ? d.especie.local[0] : null;
   let titulo = 'Desconocida', sub = '', fuente = '';
 
-  if (d.especie.fuente === 'gemini' && d.especie.nombre_comun){
+  if ((d.especie.fuente === 'gemini' || d.especie.fuente === 'qwen') && d.especie.nombre_comun){
     titulo = d.especie.nombre_comun;
     sub = 'Diagnóstico por IA';
-    fuente = '🤖 Gemini AI';
+    fuente = d.especie.fuente === 'qwen' ? '🤖 Qwen AI' : '🤖 Gemini AI';
   } else if (d.especie.fuente === 'plantnet' && pn){
     titulo = pn.nombre_comun || limpiar(pn.nombre_cientifico);
     sub = pn.nombre_cientifico;
@@ -192,7 +193,7 @@ function pintar(d){
   const sintomas = (s.sintomas && s.sintomas.length > 0) ? s.sintomas : ['Sin síntomas visibles'];
   document.getElementById('sintomas').innerHTML = sintomas.map(x => '<li>' + x + '</li>').join('');
 
-  // Diagnóstico en lenguaje natural (si viene de Gemini)
+  // Diagnóstico en lenguaje natural (si viene de la IA)
   if (s.diagnostico){
     document.getElementById('sintomas').innerHTML +=
       '<li style="margin-top:8px;color:#2D6A4F"><b>🩺 ' + s.diagnostico + '</b></li>';
@@ -212,7 +213,6 @@ function pintar(d){
       '<li>☀️ Luz: ' + c.luz + '</li>' +
       '<li>⚠️ Su punto débil: ' + c.tipico + '</li>';
   } else {
-    // Sin ficha específica: solo el consejo genérico, sin el texto "sin ficha"
     elC.innerHTML = '<li>💧 Riego moderado, buena luz y observa su respuesta.</li>';
   }
 }
