@@ -2,153 +2,132 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>FloraScan</title>
-<style>
-:root{--v:#2D6A4F;--s:#EDF3EC;--t:#1B2420;--a:#D97706;--r:#DC2626;--g:#6B7280;--b:#E3EAE2}
-*{box-sizing:border-box;margin:0;font-family:system-ui,sans-serif}
-body{background:var(--s);color:var(--t)}
-.app{max-width:430px;margin:0 auto;min-height:100vh;padding-bottom:70px}
-.sc{display:none;padding:20px}.sc.on{display:block}
-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
-.logo{font-weight:800;font-size:20px;color:var(--v)}
-.chip{padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;color:#fff;background:var(--v)}
-h1{font-size:24px}.sub{color:var(--g);font-size:14px;margin:6px 0 16px}
-.btn{border:none;border-radius:14px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;width:100%}
-.v{background:var(--v);color:#fff}.o{background:#fff;color:var(--v);border:1.5px solid var(--v)}
-.card{background:#fff;border:1px solid var(--b);border-radius:18px;padding:16px;margin-bottom:14px;box-shadow:0 6px 20px rgba(27,36,32,.06)}
-video{width:100%;border-radius:16px;background:#000}
-.preview{width:100%;border-radius:16px;margin:10px 0}
-#estado{text-align:center;color:var(--g);font-size:14px;margin:8px 0;min-height:18px}
-.nombre{font-size:22px;font-weight:800;margin-top:8px}
-.cientifico{font-style:italic;color:var(--g);font-size:14px}
-.ringwrap{display:flex;justify-content:center;margin:6px 0}
-h3{font-size:15px;margin:10px 0 6px}
-.lista{padding-left:20px;font-size:14px}.lista li{margin-bottom:4px}
-nav{position:fixed;bottom:0;left:0;right:0;max-width:430px;margin:0 auto;background:#fff;border-top:1px solid var(--b);display:flex}
-nav button{flex:1;border:none;background:none;padding:10px 0 12px;font-size:11px;color:var(--g)}
-nav button .ico{font-size:20px;display:block}
-nav button.sel{color:var(--v);font-weight:700}
-.jardin{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.planta{background:#fff;border:1px solid var(--b);border-radius:14px;overflow:hidden;cursor:pointer}
-.planta img{width:100%;height:90px;object-fit:cover}
-.planta .txt{padding:8px;font-size:13px;font-weight:600}
-.punto{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
-.tabla{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
-.tabla td{padding:7px 4px;border-bottom:1px solid var(--b)}
-.aviso{margin-top:10px;font-size:12px;color:var(--g)}
-</style>
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 <div class="app">
-<section class="sc" id="s-onboard">
-<div style="text-align:center;padding-top:70px">
-<div style="font-size:70px">🌱</div>
-<div class="logo" style="font-size:26px;margin-top:10px">FloraScan</div>
-<div style="font-size:17px;font-weight:800;margin-top:16px">Escanea. Diagnostica. Cura.</div>
-<p class="sub">Apunta a cualquier planta y descubre qué le pasa y cómo curarla, en segundos.</p>
-<button class="btn v" style="width:80%;margin:24px auto 0" onclick="empezar()">Empezar</button>
-</div>
+
+<!-- MI JARDÍN / RECORDATORIOS -->
+<section class="sc grad" id="s-jardin">
+  <h1>Mi Jardín</h1>
+  <p class="sub">Cuida cada una de tus plantas</p>
+  <div class="vacio" id="jardinVacio">
+    <div class="emoji">🪴</div>
+    <h2>Empecemos</h2>
+    <p>¡Consigue guías profesionales de cuidado de plantas para mantener tus plantas vivas!</p>
+    <button class="btn btn-verde" style="width:80%;margin:0 auto" onclick="abrirCamara()">＋ Añadir planta</button>
+  </div>
+  <div class="jardin" id="jardin"></div>
 </section>
-<section class="sc" id="s-inicio">
-<header><div class="logo">🌿 FloraScan</div><span class="chip" id="chipTier">Gratis</span></header>
-<h1>Hola 👋</h1>
-<p class="sub">Escanea una planta para identificarla y conocer su salud.</p>
-<div class="card" style="text-align:center;padding:30px">
-<button class="btn v" style="width:140px;height:140px;border-radius:50%;font-size:42px" onclick="irCamara()"></button>
-<p class="sub" style="margin:12px 0 0">Toca para escanear una planta</p>
-</div>
-<div class="card">
-<h3 style="margin-top:0">👑 Hazte Pro</h3>
-<p style="font-size:14px;color:var(--g)">Escaneos ilimitados, Mi Jardín completo y sin marca.</p>
-<button class="btn o" style="margin-top:10px" onclick="show('pro')">Ver planes</button>
-</div>
+
+<!-- GUÍA DE CUIDADOS -->
+<section class="sc" id="s-guia">
+  <h1>Guía</h1>
+  <p class="sub">Cuidados de las plantas más comunes</p>
+  <div id="guias"></div>
 </section>
-<section class="sc" id="s-camara">
-<header><div class="logo"> Escanear</div><button class="btn o" style="width:auto;padding:8px 14px" onclick="show('inicio')">← Volver</button></header>
-<video id="video" playsinline></video>
-<button id="capturar" class="btn v" style="margin-top:10px" onclick="capturar()">⭕ Capturar y analizar</button>
-<label class="btn o" style="margin-top:10px;display:block;text-align:center">🖼️ Subir foto
-<input type="file" id="inputFoto" accept="image/*" hidden onchange="subir(event)">
-</label>
-</section>
+
+<!-- RESULTADO -->
 <section class="sc" id="s-resultado">
-<header><div class="logo">🩺 Resultado</div><button class="btn o" style="width:auto;padding:8px 14px" onclick="show(volverA)">← Volver</button></header>
-<img id="preview" class="preview" alt="">
-<p id="estado"></p>
-<div class="card" id="card" style="display:none">
-<span class="chip" id="fuente"></span>
-<div class="nombre" id="nombre"></div>
-<div class="cientifico" id="cientifico"></div>
-<div class="ringwrap">
-<svg width="150" height="150" viewBox="0 0 150 150">
-<circle cx="75" cy="75" r="62" stroke="#E5EAE4" stroke-width="12" fill="none"/>
-<circle id="ring" cx="75" cy="75" r="62" stroke="#2D6A4F" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="389.6" stroke-dashoffset="389.6" transform="rotate(-90 75 75)"/>
-<text id="score" x="75" y="72" text-anchor="middle" font-size="30" font-weight="800" fill="#1B2420"></text>
-<text id="estadoSalud" x="75" y="96" text-anchor="middle" font-size="13" fill="#6B7280"></text>
-</svg>
-</div>
-<h3>🍃 Síntomas detectados</h3><ul id="sintomas" class="lista"></ul>
-<h3>💡 Tratamiento</h3><ul id="recomendaciones" class="lista"></ul>
-<h3>💧 Cuidados</h3><ul id="cuidados" class="lista"></ul>
-<p class="aviso">⚠️ Análisis orientativo asistido por IA. No sustituye a un experto.</p>
-</div>
+  <button class="btn btn-suave" style="width:auto;padding:8px 16px;margin-bottom:10px" onclick="show('jardin')">← Volver</button>
+  <img id="preview" class="preview" alt="">
+  <p id="estado"></p>
+  <div class="card" id="card" style="display:none">
+    <span class="chip" id="fuente"></span>
+    <div class="nombre" id="nombre"></div>
+    <div class="cientifico" id="cientifico"></div>
+    <div class="ringwrap">
+      <svg width="150" height="150" viewBox="0 0 150 150">
+        <circle cx="75" cy="75" r="62" stroke="#E5EAE4" stroke-width="12" fill="none"/>
+        <circle id="ring" cx="75" cy="75" r="62" stroke="#2EB872" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="389.6" stroke-dashoffset="389.6" transform="rotate(-90 75 75)"/>
+        <text id="score" x="75" y="72" text-anchor="middle" font-size="30" font-weight="800" fill="#123B2C"></text>
+        <text id="estadoSalud" x="75" y="96" text-anchor="middle" font-size="13" fill="#6B7280"></text>
+      </svg>
+    </div>
+    <h3>🍃 Síntomas detectados</h3><ul id="sintomas" class="lista"></ul>
+    <h3>💡 Tratamiento</h3><ul id="recomendaciones" class="lista"></ul>
+    <h3>💧 Cuidados</h3><ul id="cuidados" class="lista"></ul>
+    <p class="aviso">⚠️ Análisis orientativo asistido por IA. No sustituye a un experto.</p>
+  </div>
 </section>
-<section class="sc" id="s-jardin">
-<header><div class="logo">🪴 Mi Jardín</div><span class="chip" id="chipTier2">Gratis</span></header>
-<p class="sub">Toca una planta para ver su ficha.</p>
-<div class="jardin" id="jardin"></div>
-<p id="jardinVacio" class="sub" style="text-align:center;margin-top:40px">Aún no has escaneado ninguna planta.<br>¡Empieza con la cámara! </p>
+
+<!-- AJUSTES -->
+<section class="sc" id="s-ajustes" style="padding:0 0 20px">
+  <div style="padding:20px"><h1>Ajustes</h1></div>
+  <div class="grp">Suscripción</div>
+  <div class="fila" onclick="abrirPaywall()"><svg viewBox="0 0 24 24"><path d="M6 3h12l3 6-9 12L3 9z"/></svg><div class="tx">Mi servicio Pro<span class="small" id="estadoTier">Suscripción Estado: Gratis</span></div><span class="ch">›</span></div>
+  <div class="fila" onclick="restaurar()"><svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg><div class="tx">Restablecer Membresía</div><span class="ch">›</span></div>
+  <div class="grp">General</div>
+  <div class="fila" onclick="alert('Disponible próximamente')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14 0 18-3-4-3-14.5 0-18z"/></svg><div class="tx">Establecer idioma</div><span class="ch">›</span></div>
+  <div class="fila" onclick="alert('Notificaciones activadas (próximamente)')"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></svg><div class="tx">Notificaciones</div><span class="ch">›</span></div>
+  <div class="fila" onclick="limpiarCache()"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M7 7l1 13h8l1-13"/></svg><div class="tx">Limpiar caché</div><span class="ch">›</span></div>
+  <div class="grp">Soporte</div>
+  <div class="fila" onclick="alert('¡Gracias! Envíanos tu idea a soporte@florascan.app')"><svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/></svg><div class="tx">Sugerencias</div><span class="ch">›</span></div>
+  <div class="grp">Legal</div>
+  <div class="fila" onclick="window.open('https://florascan-66nw.onrender.com/privacidad')"><svg viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><circle cx="12" cy="11" r="2"/></svg><div class="tx">Política de privacidad</div><span class="ch">›</span></div>
+  <div class="fila" onclick="alert('Condiciones de uso (próximamente)')"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/></svg><div class="tx">Condiciones de uso</div><span class="ch">›</span></div>
+  <div class="grp">Información</div>
+  <div class="fila" onclick="alert('¡Gracias por apoyar FloraScan! ⭐')"><svg viewBox="0 0 24 24"><path d="M7 21V11M11 21V7a2 2 0 0 1 4 0v14M3 21h18M7 11H4a1 1 0 0 0-1 1v9"/></svg><div class="tx">Anímanos</div><span class="ch">›</span></div>
 </section>
-<section class="sc" id="s-pro">
-<header><div class="logo">👑 FloraScan Pro</div><button class="btn o" style="width:auto;padding:8px 14px" onclick="show('inicio')">← Volver</button></header>
-<div style="font-size:52px;text-align:center">👑</div>
-<div style="text-align:center;font-size:26px;font-weight:800;color:var(--v);margin:6px 0">14,99 €/año</div>
-<p class="sub" style="text-align:center">o 39,99 € para siempre</p>
-<div class="card">
-<table class="tabla">
-<tr><td></td><td><b>Gratis</b></td><td><b>Pro</b></td></tr>
-<tr><td>Identificar plantas</td><td>✅</td><td>✅</td></tr>
-<tr><td>Diagnóstico IA</td><td>3/día</td><td>✅ Ilimitado</td></tr>
-<tr><td>Mi Jardín (historial)</td><td>—</td><td>✅</td></tr>
-<tr><td>Sin marca "Free"</td><td>—</td><td>✅</td></tr>
-</table>
-<button class="btn v" onclick="activarPro()">Hacerme Pro (prueba)</button>
-<button class="btn o" style="margin-top:8px" onclick="volverGratis()">Volver a Gratis</button>
-<button class="btn o" style="margin-top:8px;background:#f3f4f6;color:#374151;border-color:#d1d5db" onclick="resetLimites()">🔄 Resetear límites (prueba)</button>
-<p class="aviso">Simulación para probar. Los pagos reales se activan al publicar.</p>
 </div>
-</section>
+
+<!-- CÁMARA -->
+<div class="cam" id="cam">
+  <video id="video" playsinline muted></video>
+  <div class="cam-top">
+    <button onclick="cerrarCamara()">✕</button>
+    <button onclick="document.getElementById('inputFoto').click()">🖼️</button>
+  </div>
+  <div class="marcos"><div class="marco"><i></i><i></i><i></i><i></i></div></div>
+  <div class="zoom"><span>＋</span><input type="range" id="zoom" min="1" max="3" step="0.1" value="1" oninput="aplicarZoom(this.value)"><span>－</span></div>
+  <div class="cam-bar">
+    <button class="opt" onclick="document.getElementById('inputFoto').click()"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="M5 17l5-5 3 3 3-3 3 3"/></svg>Fotos</button>
+    <button class="shutter" onclick="capturar()"></button>
+    <button class="opt" onclick="abrirConsejos()"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 1-1 1.7"/><path d="M12 17h.01"/></svg>Consejos para fotos</button>
+  </div>
+  <input type="file" id="inputFoto" accept="image/*" hidden onchange="subir(event)">
+</div>
+
+<!-- MODAL CONSEJOS -->
+<div class="modal" id="modalConsejos">
+  <div class="hoja">
+    <h3>📸 Consejos para fotos</h3>
+    <ul class="lista">
+      <li>Acerca la hoja con síntomas (manchas, puntos, bordes).</li>
+      <li>Usa buena luz natural, sin reflejos.</li>
+      <li>Enfoca antes de capturar.</li>
+      <li>Incluye también una hoja sana para comparar.</li>
+    </ul>
+    <button class="btn btn-verde" style="margin-top:16px" onclick="cerrarConsejos()">Entendido</button>
+  </div>
+</div>
+
+<!-- PAYWALL -->
+<div class="pw" id="paywall">
+  <div class="pw-top"><button onclick="restaurar()">Restaurar</button><button onclick="cerrarPaywall()">✕</button></div>
+  <h2>CÓMO FUNCIONA LA PRUEBA GRATIS</h2>
+  <div class="timeline">
+    <div class="tl"><div class="tl-ico">🔓</div><div><b>Hoy</b><p>Desbloquea el acceso ilimitado a todas las funciones de FloraScan Pro</p></div></div>
+    <div class="tl"><div class="tl-ico">🎉</div><div><b>Día 1 - Día 6</b><p>Disfruta de Pro y aprovecha al máximo la prueba gratuita</p></div></div>
+    <div class="tl"><div class="tl-ico">⏰</div><div><b>Día 7</b><p>Se te cobrará. Cancela en cualquier momento 24 horas antes</p></div></div>
+  </div>
+  <p class="precio"><b>Prueba 7 días gratis</b><br>Luego EUR <b>14,99</b>/año. Cancela cuando quieras.</p>
+  <div style="padding:0 24px"><button class="btn btn-grad" onclick="activarPro()">INICIAR PRUEBA GRATUITA</button></div>
+  <p class="aviso" style="padding:14px 24px 0">Tu suscripción se cargará automáticamente a tu cuenta de Google Play. Para evitar ser cargado, cancela al menos 24 horas antes de que finalice la prueba.</p>
+  <div class="legal"><a href="#">Política de privacidad</a> | <a href="#">Condiciones de uso</a> | <a href="#">Términos de la suscripción</a></div>
+</div>
+
+<!-- NAV INFERIOR -->
 <nav>
-<button id="n-inicio" class="sel" onclick="show('inicio')"><span class="ico"></span>Inicio</button>
-<button id="n-jardin" onclick="show('jardin')"><span class="ico">🪴</span>Jardín</button>
-<button id="n-pro" onclick="show('pro')"><span class="ico">👑</span>Pro</button>
+  <button id="n-jardin" class="sel" onclick="show('jardin')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Recordatorios</button>
+  <button id="n-guia" onclick="show('guia')"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/></svg>Guía</button>
+  <button onclick="abrirCamara()"><span class="circ"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#fff" stroke-width="1.8"><path d="M5 21c0-9 7-16 14-16 0 9-7 16-14 16z"/><path d="M5 21C9 15 13 11 19 5"/></svg></span></button>
+  <button onclick="abrirPaywall()"><svg viewBox="0 0 24 24"><path d="M3 17l2-9 5 5 2-7 2 7 5-5 2 9z"/><path d="M5 21h14"/></svg>Pro</button>
+  <button id="n-ajustes" onclick="show('ajustes')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>Ajustes</button>
 </nav>
-</div>
-<script>
-const LS={get(k,d){try{const v=JSON.parse(localStorage.getItem('fs_'+k));return v===null||v===undefined?d:v}catch(e){return d}},set(k,v){localStorage.setItem('fs_'+k,JSON.stringify(v))}};
-let stream=null, volverA='inicio';const video=document.getElementById('video');
-function show(n){document.querySelectorAll('.sc').forEach(s=>s.classList.remove('on'));document.getElementById('s-'+n).classList.add('on');['inicio','jardin','pro'].forEach(t=>{const b=document.getElementById('n-'+t);if(b)b.classList.toggle('sel',t===n)});if(n==='jardin')pintarJardin();window.scrollTo(0,0)}
-function tier(){return LS.get('tier','free')}
-function actualizarChips(){const t=tier();const txt=t==='free'?'Gratis':(t==='pro'?'⭐ Pro':' De por vida');document.getElementById('chipTier').textContent=txt;document.getElementById('chipTier2').textContent=txt}
-function empezar(){LS.set('onboarded',true);show('inicio')}
-function irCamara(){show('camara');abrirCamara()}
-function activarPro(){LS.set('tier','pro');actualizarChips();alert('✅ Pro activado (simulación).');show('inicio')}
-function volverGratis(){LS.set('tier','free');actualizarChips();show('inicio')}
-function resetLimites(){const hoy=new Date().toDateString();LS.set('usado_'+hoy,0);alert('✅ Límites reseteados para hoy.');show('inicio')}
-function consumirEscaneo(){if(tier()!=='free')return true;const hoy=new Date().toDateString();const usado=LS.get('usado_'+hoy,0);if(usado>=3){alert('Has alcanzado el límite de 3 escaneos diarios. Ve a Pro y pulsa "Resetear límites" para seguir probando.');return false}LS.set('usado_'+hoy,usado+1);return true}
-async function abrirCamara(){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});video.srcObject=stream;video.style.display='block';document.getElementById('capturar').style.display='block';await video.play()}catch(e){alert('No se pudo abrir la cámara: '+e)}}
-function capturar(){const c=document.createElement('canvas');c.width=video.videoWidth;c.height=video.videoHeight;c.getContext('2d').drawImage(video,0,0);stream.getTracks().forEach(t=>t.stop());video.style.display='none';document.getElementById('capturar').style.display='none';c.toBlob(analizar,'image/jpeg',0.9)}
-async function subir(ev){const f=ev.target.files[0];if(f)await analizar(f)}
-async function prepararBlob(blob){try{const bmp=await createImageBitmap(blob);const max=1280;const esc=Math.min(1,max/Math.max(bmp.width,bmp.height));const c=document.createElement('canvas');c.width=Math.round(bmp.width*esc);c.height=Math.round(bmp.height*esc);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);return await new Promise(res=>c.toBlob(res,'image/jpeg',0.9))}catch(e){return blob}}
-async function analizar(blobOriginal){if(!consumirEscaneo())return;const blob=await prepararBlob(blobOriginal);document.getElementById('preview').src=URL.createObjectURL(blob);document.getElementById('preview').style.display='block';document.getElementById('estado').textContent=' Analizando con IA...';document.getElementById('card').style.display='none';const fd=new FormData();fd.append('imagen',blob,'foto.jpg');try{const r=await fetch('/analizar',{method:'POST',body:fd});if(!r.ok)throw new Error('Servidor: '+r.status);const d=await r.json();guardarEnJardin(blob,d);pintar(d);volverA='camara';show('resultado')}catch(e){document.getElementById('estado').textContent='❌ Error: '+e.message}}
-function guardarEnJardin(blob,d){const plantas=LS.get('plantas',[]);const reader=new FileReader();reader.onload=()=>{plantas.unshift({id:Date.now(),img:reader.result,data:d,fecha:new Date().toLocaleDateString()});if(plantas.length>30)plantas.length=30;LS.set('plantas',plantas)};reader.readAsDataURL(blob)}
-function pintarJardin(){const plantas=LS.get('plantas',[]);const cont=document.getElementById('jardin');const vacio=document.getElementById('jardinVacio');if(!plantas.length){cont.innerHTML='';vacio.style.display='block';return}vacio.style.display='none';cont.innerHTML=plantas.map(p=>{const color=p.data.salud.estado==='saludable'?'#2D6A4F':(p.data.salud.estado==='atencion'?'#D97706':'#DC2626');const nom=p.data.especie.nombre_comun||'Planta';return `<div class="planta" onclick="verDetalle(${p.id})"><img src="${p.img}"><div class="txt"><span class="punto" style="background:${color}"></span>${nom}</div></div>`}).join('')}
-function verDetalle(id){const p=LS.get('plantas',[]).find(x=>x.id===id);if(p){volverA='jardin';pintar(p.data);show('resultado')}}
-function limpiar(s){return(s||'').split(' (')[0]}
-function pintar(d){document.getElementById('estado').textContent='';document.getElementById('card').style.display='block';const pn=d.especie.plantnet?d.especie.plantnet[0]:null;const lo=d.especie.local?d.especie.local[0]:null;let titulo='Desconocida',sub='',fuente='';if((d.especie.fuente==='gemini'||d.especie.fuente==='qwen')&&d.especie.nombre_comun){titulo=d.especie.nombre_comun;sub='Diagnóstico por IA';fuente=d.especie.fuente==='qwen'?'🤖 Qwen AI':'🤖 Gemini AI'}else if(d.especie.fuente==='plantnet'&&pn){titulo=pn.nombre_comun||limpiar(pn.nombre_cientifico);sub=pn.nombre_cientifico;fuente='Pl@ntNet · '+Math.round(pn.confianza*100)+'%'}else if(lo){titulo=lo.clase.charAt(0).toUpperCase()+lo.clase.slice(1);sub='Modelo local';fuente='Local · '+Math.round(lo.confianza*100)+'%'}document.getElementById('fuente').textContent=fuente;document.getElementById('nombre').textContent=titulo;document.getElementById('cientifico').textContent=sub;const s=d.salud,C=389.6;const color=s.estado==='saludable'?'#2D6A4F':(s.estado==='atencion'?'#D97706':'#DC2626');const ring=document.getElementById('ring');ring.style.stroke=color;ring.style.strokeDashoffset=C*(1-s.puntuacion/100);document.getElementById('score').textContent=s.puntuacion+'%';document.getElementById('estadoSalud').textContent=s.estado==='saludable'?'Saludable':(s.estado==='atencion'?'Atención necesaria':'Crítico');const sintomas=(s.sintomas&&s.sintomas.length>0)?s.sintomas:['Sin síntomas visibles'];document.getElementById('sintomas').innerHTML=sintomas.map(x=>'<li>'+x+'</li>').join('');if(s.diagnostico){document.getElementById('sintomas').innerHTML+='<li style="margin-top:8px;color:#2D6A4F"><b>🩺 '+s.diagnostico+'</b></li>'}const recs=(s.recomendaciones&&s.recomendaciones.length>0)?s.recomendaciones:['Mantén los cuidados habituales'];document.getElementById('recomendaciones').innerHTML=recs.map(x=>'<li>'+x+'</li>').join('');const c=d.cuidados;const elC=document.getElementById('cuidados');if(c){elC.innerHTML='<li><b>'+c.grupo+'</b></li><li>💧 Riego: '+c.riego+'</li><li>☀️ Luz: '+c.luz+'</li><li>⚠️ Su punto débil: '+c.tipico+'</li>'}else{elC.innerHTML='<li>💧 Riego moderado, buena luz y observa su respuesta.</li>'}}
-if(!LS.get('onboarded',false))show('onboard');else show('inicio');actualizarChips();
-</script>
+
+<script src="/app.js"></script>
 </body>
 </html>
-
