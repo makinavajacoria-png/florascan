@@ -884,6 +884,14 @@ async def analizar(imagen: UploadFile = File(...)):
 def interfaz():
     return FileResponse(BASE / "app.html")
 
+@app.get("/styles.css")
+def estilos():
+    return FileResponse(BASE / "styles.css", media_type="text/css")
+
+@app.get("/app.js")
+def script():
+    return FileResponse(BASE / "app.js", media_type="text/javascript")
+
 
 @app.get("/")
 def raiz():
