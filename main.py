@@ -882,6 +882,153 @@ async def analizar(imagen: UploadFile = File(...)):
         "aviso": "Análisis local orientativo. Las APIs externas no respondieron.",
     }
 
+# ============================================================
+# INFORME DETALLADO (PDF) — 0,50 € / incluido en Pro
+# ============================================================
+
+import uuid
+import datetime
+
+INFORMES = {}  # token -> PDF en memoria
+
+PROMPT_INFORME = """Eres un botánico experto. Redacta un informe COMPLETO en español sobre la planta de la imagen.
+Devuelve SOLO JSON válido:
+{{
+ "especie": "nombre común (nombre científico)",
+ "descripcion": "2-3 frases describiendo la planta",
+ "luz": "necesidades de luz detalladas",
+ "riego": "pauta completa: frecuencia verano/invierno, cantidad y señales de exceso/falta",
+ "sustrato": "tipo de sustrato y drenaje",
+ "abono": "pauta de fertilización",
+ "poda": "cuándo y cómo podar",
+ "temperatura": "rango ideal y resistencia a heladas",
+ "plagas": ["plaga: síntoma y tratamiento"],
+ "enfermedades": ["enfermedad: síntoma y tratamiento"],
+ "calendario": ["Primavera: acciones", "Verano: acciones", "Otoño: acciones", "Invierno: acciones"],
+ "consejo_experto": "consejo final personalizado según lo que veas en la imagen"
+}}
+Máximo 2 frases por campo, 3 plagas, 3 enfermedades. Sin markdown."""
+
+
+def generar_informe_pdf(d):
+    from fpdf import FPDF
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.set_text_color(18, 59, 44)
+    pdf.cell(0, 12, "FloraScan - Informe detallado", ln=True, align="C")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(110, 118, 110)
+    pdf.cell(0, 8, datetime.date.today().strftime("%d/%m/%Y"), ln=True, align="C")
+    pdf.ln(4)
+
+    def seccion(t):
+        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_text_color(30, 158, 99)
+        pdf.ln(3)
+        pdf.cell(0, 9, t, ln=True)
+        pdf.set_font("Helvetica", "", 11)
+        pdf.set_text_color(40, 48, 40)
+
+    def parr(t):
+        pdf.multi_cell(0, 6, t or "-")
+        pdf.ln(1)
+
+    pdf.set_font("Helvetica", "B", 15)
+    pdf.set_text_color(18, 59, 44)
+    pdf.multi_cell(0, 9, d.get("especie", "Planta"), align="C")
+    pdf.ln(2)
+    seccion("Descripcion"); parr(d.get("descripcion"))
+    seccion("Luz"); parr(d.get("luz"))
+    seccion("Riego"); parr(d.get("riego"))
+    seccion("Sustrato"); parr(d.get("sustrato"))
+    seccion("Abono"); parr(d.get("abono"))
+    seccion("Poda"); parr(d.get("poda"))
+    seccion("Temperatura"); parr(d.get("temperatura"))
+    seccion("Plagas frecuentes")
+    for x in d.get("plagas", []): parr("- " + x)
+    seccion("Enfermedades frecuentes")
+    for x in d.get("enfermedades", []): parr("- " + x)
+    seccion("Calendario anual")
+    for x in d.get("calendario", []): parr("- " + x)
+    seccion("Consejo del experto"); parr(d.get("consejo_experto"))
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_text_color(140, 148, 140)
+    pdf.multi_cell(0, 5, "Informe orientativo generado por IA. No sustituye el diagnostico de un profesional.")
+    return pdf.output()
+
+
+def informe_detallado_gemini(img):
+    if not GEMINI_KEY:
+        return None
+    img_b64 = base64.b64encode(imagen_a_jpeg_bytes(img, max_px=1024)).decode()
+    for modelo in MODELOS_GEMINI:
+        texto = _pedir_texto_gemini(modelo, PROMPT_INFORME, img_b64, forzar_json=True)
+        if texto in (None, "no_modelo"):
+            continue
+        try:
+            return extraer_json(texto)
+        except ValueError:
+            continue
+    return None
+
+
+def informe_detallado_qwen(img):
+    if not QWEN_KEY:
+        return None
+    img_b64 = base64.b64encode(imagen_a_jpeg_bytes(img, max_px=1024)).decode()
+    for modelo in QWEN_MODELOS:
+        try:
+            r = requests.post(
+                f"{QWEN_BASE}/chat/completions",
+                headers={"Authorization": f"Bearer {QWEN_KEY}", "Content-Type": "application/json"},
+                json={"model": modelo, "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": PROMPT_INFORME},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}]}],
+                    "temperature": 0.2, "max_tokens": 3000},
+                timeout=90,
+            )
+            r.raise_for_status()
+            contenido = r.json()["choices"][0]["message"]["content"]
+            if isinstance(contenido, list):
+                contenido = "".join(p.get("text", "") for p in contenido)
+            return extraer_json(contenido)
+        except Exception:
+            continue
+    return None
+
+
+@app.post("/informe")
+async def informe(imagen: UploadFile = File(...)):
+    img_bytes = await imagen.read()
+    try:
+        img = Image.open(io.BytesIO(img_bytes))
+        img = ImageOps.exif_transpose(img)
+        img.load()
+    except Exception:
+        raise HTTPException(400, "No se pudo leer la imagen.")
+    datos = informe_detallado_gemini(img) or informe_detallado_qwen(img)
+    if not datos:
+        raise HTTPException(503, "La IA no esta disponible ahora mismo. Intentalo en unos minutos.")
+    token = uuid.uuid4().hex
+    INFORMES[token] = {"pdf": bytes(generar_informe_pdf(datos)), "ts": time.time()}
+    ahora = time.time()
+    for k in [k for k, v in INFORMES.items() if ahora - v["ts"] > 3600]:
+        del INFORMES[k]
+    return {"token": token, "url": f"/informe_pdf/{token}"}
+
+
+@app.get("/informe_pdf/{token}")
+def informe_pdf(token: str):
+    from fastapi.responses import Response
+    item = INFORMES.get(token)
+    if not item:
+        raise HTTPException(404, "El informe ha caducado. Vuelve a generarlo.")
+    return Response(content=item["pdf"], media_type="application/pdf",
+                    headers={"Content-Disposition": 'inline; filename="informe_florascan.pdf"'})
+
 
 @app.get("/app")
 def interfaz():

@@ -548,3 +548,12 @@ h3{
   font-size:20px;
   color:var(--verde-oscuro);
 }
+
+/* ---- FIX: barra superior del paywall bajo la status bar ---- */
+.pw-top{padding-top:calc(20px + env(safe-area-inset-top))}
+/* ---- Botón eliminar planta en el jardín ---- */
+.planta{position:relative}
+.borrar{position:absolute;top:6px;right:6px;width:30px;height:30px;border:none;border-radius:50%;
+background:rgba(0,0,0,.55);color:#fff;font-size:15px;cursor:pointer;backdrop-filter:blur(4px)}
+/* ---- Botón informe detallado ---- */
+.btn-informe{background:#fff;color:var(--verde2);border:2px solid var(--verde);box-shadow:none;margin-top:12px}

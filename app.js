@@ -1,5 +1,5 @@
 const LS={get(k,d){try{const v=JSON.parse(localStorage.getItem('fs_'+k));return v===null||v===undefined?d:v}catch(e){return d}},set(k,v){localStorage.setItem('fs_'+k,JSON.stringify(v))}};
-let stream=null,volverA='jardin',zoomTrack=null;
+let stream=null,volverA='jardin',zoomTrack=null,ultimoBlob=null;
 const video=document.getElementById('video');
 const $=id=>document.getElementById(id);
 
@@ -31,7 +31,7 @@ function cerrarConsejos(){$('modalConsejos').classList.remove('on')}
 
 async function prepararBlob(b){try{const bmp=await createImageBitmap(b);const m=1280,e=Math.min(1,m/Math.max(bmp.width,bmp.height));const c=document.createElement('canvas');c.width=Math.round(bmp.width*e);c.height=Math.round(bmp.height*e);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);return await new Promise(r=>c.toBlob(r,'image/jpeg',0.9))}catch(e){return b}}
 
-async function analizar(blobO){if(!consumirEscaneo())return;const blob=await prepararBlob(blobO);
+async function analizar(blobO){if(!consumirEscaneo())return;const blob=await prepararBlob(blobO);ultimoBlob=blob;
 show('resultado');$('preview').src=URL.createObjectURL(blob);$('card').style.display='none';$('estado').textContent='🔬 Analizando con IA...';
 const fd=new FormData();fd.append('imagen',blob,'foto.jpg');
 try{const r=await fetch('/analizar',{method:'POST',body:fd});if(!r.ok)throw new Error('Servidor '+r.status);
@@ -43,9 +43,30 @@ function pintarJardin(){const p=LS.get('plantas',[]);$('jardinVacio').style.disp
 $('jardin').innerHTML=p.map(x=>{const s=x.data.salud,c=s.estado==='saludable'?'#2EB872':(s.estado==='atencion'?'#D97706':'#DC2626');
 const nom=x.data.especie.nombre_comun||'Planta';const dias=(x.data.cuidados&&x.data.cuidados.riego&&/Escaso|Muy escaso/i.test(x.data.cuidados.riego))?10:5;
 const due=((Date.now()-x.fecha)/864e5)>=dias;
-return '<div class="planta" onclick="verDetalle('+x.id+')"><img src="'+x.img+'"><div class="txt"><span class="punto" style="background:'+c+'"></span>'+nom+(due?'<span class="badge-riego">💧 Toca revisar riego</span>':'')+'</div></div>'}).join('')}
+return '<div class="planta" onclick="verDetalle('+x.id+')"><button class="borrar" onclick="event.stopPropagation();eliminarPlanta('+x.id+')">✕</button><img src="'+x.img+'"><div class="txt"><span class="punto" style="background:'+c+'"></span>'+nom+(due?'<span class="badge-riego">💧 Toca revisar riego</span>':'')+'</div></div>'}).join('')}
 
-function verDetalle(id){const p=LS.get('plantas',[]).find(x=>x.id===id);if(p){volverA='jardin';pintar(p.data);show('resultado')}}
+function eliminarPlanta(id){if(confirm('¿Eliminar esta planta de tu jardín?')){LS.set('plantas',LS.get('plantas',[]).filter(x=>x.id!==id));pintarJardin()}}
+
+function verDetalle(id){const p=LS.get('plantas',[]).find(x=>x.id===id);if(p){volverA='jardin';fetch(p.img).then(r=>r.blob()).then(b=>ultimoBlob=b);pintar(p.data);show('resultado')}}
+
+async function pedirInforme(){
+  if(!ultimoBlob){alert('Primero escanea una planta.');return}
+  if(tier()!=='pro'){if(!confirm('El informe detallado cuesta 0,50 € (simulación). En la versión final se cobrará vía Google Play. ¿Continuar?'))return}
+  $('estado').textContent='📄 Generando informe detallado...';
+  const fd=new FormData();fd.append('imagen',ultimoBlob,'foto.jpg');
+  try{
+    const r=await fetch('/informe',{method:'POST',body:fd});
+    if(!r.ok)throw new Error('Error '+r.status);
+    const d=await r.json();
+    const a=document.createElement('a');
+    a.href=d.url;
+    a.download='informe_florascan.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    $('estado').textContent='✅ Informe descargado';
+  }catch(e){alert('No se pudo generar el informe: '+e.message)}
+}
 
 const GUIAS=[['Potos / Pothos','Riego cuando los 2-3 cm superiores estén secos','Luz brillante indirecta'],['Monstera','Sustrato ligeramente húmedo, sin encharcar','Luz indirecta brillante'],['Lengua de suegra','Muy escaso: solo con sustrato totalmente seco','Tolera poca luz y sol suave'],['Aloe vera','Solo cuando el sustrato esté seco','Pleno sol o luz muy brillante'],['Lavanda','Escaso, deja secar entre riegos','Pleno sol'],['Olivo','Escaso una vez establecido','Pleno sol'],['Rosal','Regular al pie, sin mojar hojas','Pleno sol ventilado'],['Adelfa','Moderado; tolera sequía establecida','Pleno sol']];
 function pintarGuias(){$('guias').innerHTML=GUIAS.map(g=>'<div class="card"><b>'+g[0]+'</b><p style="font-size:14px;color:#6B7280;margin-top:4px">💧 '+g[1]+'</p><p style="font-size:14px;color:#6B7280">☀️ '+g[2]+'</p></div>').join('')}
@@ -53,16 +74,18 @@ function pintarGuias(){$('guias').innerHTML=GUIAS.map(g=>'<div class="card"><b>'
 function limpiar(s){return(s||'').split(' (')[0]}
 function pintar(d){$('estado').textContent='';$('card').style.display='block';
 const pn=d.especie.plantnet?d.especie.plantnet[0]:null,lo=d.especie.local?d.especie.local[0]:null;
-let t='Desconocida',sub='',f='';
-if((d.especie.fuente==='gemini'||d.especie.fuente==='qwen')&&d.especie.nombre_comun){t=d.especie.nombre_comun;sub='Diagnóstico por IA';f=d.especie.fuente==='qwen'?'🤖 Qwen AI':'🤖 Gemini AI'}
-else if(d.especie.fuente==='plantnet'&&pn){t=pn.nombre_comun||limpiar(pn.nombre_cientifico);sub=pn.nombre_cientifico;f='Pl@ntNet · '+Math.round(pn.confianza*100)+'%'}
-else if(lo){t=lo.clase[0].toUpperCase()+lo.clase.slice(1);sub='Modelo local';f='Local · '+Math.round(lo.confianza*100)+'%'}
-$('fuente').textContent=f;$('nombre').textContent=t;$('cientifico').textContent=sub;
+let t='Desconocida',sub='';
+if(d.especie.nombre_comun&&d.especie.nombre_comun.toLowerCase()!=='no identificada'){t=d.especie.nombre_comun}
+else if(pn){t=pn.nombre_comun||limpiar(pn.nombre_cientifico)}
+else if(lo){t=lo.clase[0].toUpperCase()+lo.clase.slice(1)}
+sub=(pn&&pn.nombre_cientifico)?pn.nombre_cientifico:(lo?lo.clase:'Análisis FloraScan');
+$('fuente').textContent='🌿 FloraScan';$('nombre').textContent=t;$('cientifico').textContent=sub;
 const s=d.salud,C=389.6,col=s.estado==='saludable'?'#2EB872':(s.estado==='atencion'?'#D97706':'#DC2626');
 const ring=$('ring');ring.style.stroke=col;ring.style.strokeDashoffset=C*(1-s.puntuacion/100);
 $('score').textContent=s.puntuacion+'%';$('estadoSalud').textContent=s.estado==='saludable'?'Saludable':(s.estado==='atencion'?'Atención necesaria':'Crítico');
 $('sintomas').innerHTML=((s.sintomas&&s.sintomas.length)?s.sintomas:['Sin síntomas visibles']).map(x=>'<li>'+x+'</li>').join('')+(s.diagnostico?'<li style="margin-top:8px;color:#1E9E63"><b>🩺 '+s.diagnostico+'</b></li>':'');
 $('recomendaciones').innerHTML=((s.recomendaciones&&s.recomendaciones.length)?s.recomendaciones:['Mantén los cuidados habituales']).map(x=>'<li>'+x+'</li>').join('');
-const c=d.cuidados;$('cuidados').innerHTML=c?'<li><b>'+c.grupo+'</b></li><li>💧 Riego: '+c.riego+'</li><li>☀️ Luz: '+c.luz+'</li><li>⚠️ Su punto débil: '+c.tipico+'</li>':'<li>💧 Riego moderado, buena luz y observa su respuesta.</li>'}
+const c=d.cuidados;$('cuidados').innerHTML=c?'<li><b>'+c.grupo+'</b></li><li>💧 Riego: '+c.riego+'</li><li>☀️ Luz: '+c.luz+'</li><li>⚠️ Su punto débil: '+c.tipico+'</li>':'<li>💧 Riego moderado, buena luz y observa su respuesta.</li>';
+$('btnInforme').textContent=tier()==='pro'?'📄 Informe detallado (incluido en Pro)':'📄 Informe detallado (0,50 €)';}
 
 show('jardin');actualizarTier();
