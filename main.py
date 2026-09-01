@@ -442,26 +442,25 @@ def normalizar_estado(estado):
     return "atencion"
 
 
-PROMPT_DIAGNOSTICO = """Eres un experto en jardinería, fitopatología y cuidado de plantas.
-Analiza la imagen y responde SOLO en JSON válido, sin markdown.{contexto}
+PROMPT_DIAGNOSTICO = """Eres un experto en jardinería y fitopatología.
+Analiza la imagen y responde SOLO en JSON válido.{contexto}
 
-Devuelve exactamente estas claves:
+Devuelve exactamente:
 {{
-  "especie": "nombre común en español o científico o 'no identificada'",
+  "especie": "nombre común o 'no identificada'",
   "estado": "saludable" | "atencion" | "critico",
   "confianza": 0.0,
-  "sintomas": ["síntomas visibles concretos"],
-  "diagnostico": "qué le pasa, en 1 frase",
-  "tratamiento": ["pasos concretos y realistas"],
-  "prevencion": ["1-2 medidas para evitar que vuelva"]
+  "sintomas": ["máximo 3 síntomas visibles"],
+  "diagnostico": "qué le pasa en 1 frase",
+  "tratamiento": ["máximo 3 pasos concretos"],
+  "prevencion": ["1 medida preventiva"]
 }}
 
 Reglas:
-- SÉ CONCISO: máximo 3 síntomas, máximo 3 tratamientos, diagnóstico y prevención en 1 frase.
-- Si NO ves síntomas claros: estado="saludable", sintomas=[], tratamiento=[].
-- Si ves manchas, puntos, amarilleo, polvo blanco, hojas comidas o necrosis: NO digas saludable.
-- Usa "compatible con / posible / podría ser" si no hay certeza.
-- Responde en español."""
+- Si NO ves síntomas: estado="saludable", sintomas=[], tratamiento=[]
+- Si ves manchas, amarilleo, polvo blanco o necrosis: NO digas saludable
+- Usa "posible / compatible con" si no hay certeza
+- Español, conciso, sin markdown"""
 
 
 def construir_resultado(resultado, especie_contexto, modelo_nombre):
@@ -787,10 +786,6 @@ def score_desde_estado(estado, confianza=0.7):
 
 @app.post("/analizar")
 async def analizar(imagen: UploadFile = File(...)):
-    print("\n" + "="*60)
-    print("🌿 NUEVO ANÁLISIS")
-    print("="*60)
-    
     img_bytes_original = await imagen.read()
     try:
         img = Image.open(io.BytesIO(img_bytes_original))
@@ -799,11 +794,28 @@ async def analizar(imagen: UploadFile = File(...)):
     except Exception:
         raise HTTPException(status_code=400, detail="No se pudo leer la imagen.")
 
-    img_bytes_jpeg = imagen_a_jpeg_bytes(img)
+    img_bytes_jpeg = imagen_a_jpeg_bytes(img, max_px=1024)  # ← BAJAR de 1280 a 1024
 
-    # Identificación
-    plantnet = identificar_plantnet(img_bytes_jpeg)
-    local = identificar_local(img)
+    # ⚡ PARALELIZAR: lanzar Pl@ntNet + identificación local + diagnóstico al mismo tiempo
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    
+    executor = ThreadPoolExecutor(max_workers=3)
+    loop = asyncio.get_event_loop()
+    
+    # Lanzar todas las tareas en paralelo
+    task_plantnet = loop.run_in_executor(executor, identificar_plantnet, img_bytes_jpeg)
+    task_local = loop.run_in_executor(executor, identificar_local, img)
+    task_gemini = loop.run_in_executor(executor, diagnostico_gemini, img, None)  # Sin especie_contexto todavía
+    
+    # Esperar resultados
+    plantnet, local, ia_gemini = await asyncio.gather(task_plantnet, task_local, task_gemini, return_exceptions=True)
+    
+    # Si alguna falló, convertir a None
+    plantnet = plantnet if not isinstance(plantnet, Exception) else []
+    local = local if not isinstance(local, Exception) else []
+    ia_gemini = ia_gemini if not isinstance(ia_gemini, Exception) else None
+    
     fuente_usada, textos_perfil = elegir_especie(plantnet, local)
     cultivo = detectar_cultivo(plantnet, local)
     perfil = perfil_de(textos_perfil)
@@ -820,17 +832,14 @@ async def analizar(imagen: UploadFile = File(...)):
         cuidados = {"grupo": perfil["grupo"], "riego": perfil["riego"],
                     "luz": perfil["luz"], "tipico": perfil["tipico"]}
 
-    # Cascada: Gemini → Qwen → local
-    print("\n🔬 Iniciando diagnóstico...")
-    ia = diagnostico_gemini(img, especie_contexto=especie_contexto)
-    fuente_ia = "gemini"
-    
-    if not ia:
-        print("\n⚠️ Gemini falló, intentando Qwen...")
-        ia = diagnostico_gemini(img, especie_contexto=especie_contexto)
-        if ia:
-            fuente_ia = "qwen"
-            print(f"✅ Qwen funcionó como respaldo")
+    # Si Gemini ya respondió, usarlo
+    if ia_gemini:
+        fuente_ia = "gemini"
+        ia = ia_gemini
+    else:
+        # Probar Qwen como respaldo
+        ia = diagnostico_qwen(img, especie_contexto=especie_contexto)
+        fuente_ia = "qwen" if ia else None
 
     if ia:
         estado = normalizar_estado(ia.get("estado"))
@@ -853,9 +862,6 @@ async def analizar(imagen: UploadFile = File(...)):
             "modelo": ia.get("modelo"),
         }
         
-        print(f"\n✅ Diagnóstico completado con {fuente_ia.upper()}")
-        print("="*60 + "\n")
-        
         return {
             "especie": {
                 "fuente": fuente_ia,
@@ -868,10 +874,7 @@ async def analizar(imagen: UploadFile = File(...)):
         }
 
     # Fallback local
-    print("\n⚠️ Todas las APIs fallaron, usando modelo local")
     salud = analizar_salud_local(img, cultivo=cultivo, perfil=perfil)
-    print("="*60 + "\n")
-    
     return {
         "especie": {"fuente": fuente_usada, "plantnet": plantnet, "local": local},
         "salud": salud,
