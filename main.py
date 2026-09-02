@@ -786,7 +786,8 @@ def score_desde_estado(estado, confianza=0.7):
 
 @app.post("/analizar")
 async def analizar(imagen: UploadFile = File(...)):
-    img_bytes_original = await imagen.read()
+    img_bytes_original = await imagen.read() 
+    _stats_contar("escaneos")
     try:
         img = Image.open(io.BytesIO(img_bytes_original))
         img = ImageOps.exif_transpose(img)
@@ -1012,6 +1013,7 @@ async def informe(imagen: UploadFile = File(...)):
     datos = informe_detallado_gemini(img) or informe_detallado_qwen(img)
     if not datos:
         raise HTTPException(503, "La IA no esta disponible ahora mismo. Intentalo en unos minutos.")
+        _stats_contar("informes")
     token = uuid.uuid4().hex
     INFORMES[token] = {"pdf": bytes(generar_informe_pdf(datos)), "ts": time.time()}
     ahora = time.time()
@@ -1027,7 +1029,33 @@ def informe_pdf(token: str):
     if not item:
         raise HTTPException(404, "El informe ha caducado. Vuelve a generarlo.")
     return Response(content=item["pdf"], media_type="application/pdf",
-                    headers={"Content-Disposition": 'inline; filename="informe_florascan.pdf"'})
+                    headers={"Content-Disposition": 'attachment; filename="informe_florascan.pdf"'})
+
+# ============================================================
+# CONTADOR DE USO Y COSTES
+# ============================================================
+import json as _json
+STATS_FILE = BASE / "stats.json"
+
+def _stats_leer():
+    try: return _json.loads(STATS_FILE.read_text(encoding="utf-8"))
+    except Exception: return {"escaneos":0,"informes":0,"por_dia":{}}
+
+def _stats_contar(tipo):
+    s=_stats_leer()
+    s[tipo]=s.get(tipo,0)+1
+    dia=datetime.date.today().isoformat()
+    d=s.setdefault("por_dia",{})
+    d.setdefault(dia,{"escaneos":0,"informes":0})
+    d[dia][tipo]=d[dia].get(tipo,0)+1
+    STATS_FILE.write_text(_json.dumps(s,ensure_ascii=False))
+
+@app.get("/stats")
+def stats():
+    s=_stats_leer()
+    coste=s.get("escaneos",0)*0.002 + s.get("informes",0)*0.004
+    return {**s,"coste_estimado_eur":round(coste,4),
+            "nota":"escaneo ~0,002 € · informe ~0,004 €"}
 
 
 @app.get("/app")
