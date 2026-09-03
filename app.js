@@ -12,8 +12,11 @@ function tier(){return LS.get('tier','free')}
 function actualizarTier(){$('estadoTier').textContent='Suscripción Estado: '+(tier()==='free'?'Gratis':(tier()==='pro'?'Pro (prueba)':'De por vida'))}
 function abrirPaywall(){$('paywall').classList.add('on')}
 function cerrarPaywall(){$('paywall').classList.remove('on')}
-function elegirPlan(p){planElegido=p;const a=$('planAnual'),m=$('planMensual');if(a)a.classList.toggle('sel',p==='anual');if(m)m.classList.toggle('sel',p==='mensual');if(p==='anual'){$('pwCta').textContent='Prueba Gratis →';$('pwLinea').textContent='7 días gratis. Luego, 14,99 €/año (~1,25 €/mes)';}else{$('pwCta').textContent='Continuar →';$('pwLinea').textContent='1 mes por 1,99 €. Renovación mensual, cancela cuando quieras.';}}
-function activarPro(){LS.set('tier','pro');LS.set('plan',planElegido);LS.set('trialFin',Date.now()+7*864e5);actualizarTier();cerrarPaywall();alert(planElegido==='mensual'?'✅ Pro mensual activado (simulación).':'✅ Prueba Pro de 7 días activada (simulación).');show('jardin')}
+function elegirPlan(p){planElegido=p;const a=$('planAnual'),m=$('planMensual'),l=$('planLifetime');if(a)a.classList.toggle('sel',p==='anual');if(m)m.classList.toggle('sel',p==='mensual');if(l)l.classList.toggle('sel',p==='lifetime');
+if(p==='anual'){$('pwCta').textContent='Prueba Gratis →';$('pwLinea').textContent='7 días gratis. Luego, 18,99 €/año (~1,58 €/mes)';}
+else if(p==='mensual'){$('pwCta').textContent='Continuar →';$('pwLinea').textContent='1 mes por 1,99 €. Renovación mensual, cancela cuando quieras.';}
+else{$('pwCta').textContent='Comprar de por vida →';$('pwLinea').textContent='Pago único de 35,99 €. Acceso Pro para siempre, sin renovaciones.';}}
+function activarPro(){LS.set('tier','pro');LS.set('plan',planElegido);if(planElegido==='lifetime'){LS.set('lifetime',true);LS.set('trialFin',0);}else{LS.set('lifetime',false);LS.set('trialFin',Date.now()+7*864e5);}actualizarTier();cerrarPaywall();alert(planElegido==='lifetime'?'✅ Acceso Pro de por vida activado (simulación).':(planElegido==='mensual'?'✅ Pro mensual activado (simulación).':'✅ Prueba Pro de 7 días activada (simulación).'));show('jardin')}
 function restaurar(){alert(tier()==='free'?'No hay compras anteriores.':'✅ Membresía restaurada: '+tier())}
 function limpiarCache(){if(confirm('¿Borrar datos?')){Object.keys(localStorage).filter(k=>k.startsWith('fs_')).forEach(k=>localStorage.removeItem(k));location.reload()}}
 function consumirEscaneo(){if(tier()!=='free')return true;const hoy=new Date().toDateString();const u=LS.get('usado_'+hoy,0);if(u>=3){abrirPaywall();return false}LS.set('usado_'+hoy,u+1);return true}

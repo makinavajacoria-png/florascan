@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>FloraScan</title>
-<link rel="stylesheet" href="/styles.css?v=10">
+<link rel="stylesheet" href="/styles.css?v=12">
 </head>
 <body>
 <div class="app">
@@ -129,25 +129,30 @@
       <li><span class="check">✓</span><span>Jardín, recordatorios e informes <b>sin límites</b></span></li>
     </ul>
     <div class="pw-planes">
-      <div class="plan sel" id="planAnual" onclick="elegirPlan('anual')">
-        <span class="plan-tag">MÁS POPULAR</span>
-        <b>7 días gratis</b>
-        <span class="plan-precio">Luego 14,99 €/año</span>
-        <span class="plan-check">✓</span>
-      </div>
-      <div class="plan" id="planMensual" onclick="elegirPlan('mensual')">
-        <b>1 mes</b>
-        <span class="plan-precio">1,99 €</span>
-        <span class="plan-check">✓</span>
-      </div>
-    </div>
+  <div class="plan" id="planMensual" onclick="elegirPlan('mensual')">
+    <b>1 mes</b>
+    <span class="plan-precio">1,99 €</span>
+    <span class="plan-check">✓</span>
+  </div>
+  <div class="plan sel" id="planAnual" onclick="elegirPlan('anual')">
+    <span class="plan-tag">MÁS POPULAR</span>
+    <b>7 días gratis</b>
+    <span class="plan-precio">Luego 18,99 €/año</span>
+    <span class="plan-check">✓</span>
+  </div>
+  <div class="plan" id="planLifetime" onclick="elegirPlan('lifetime')">
+    <b>De por vida</b>
+    <span class="plan-precio">35,99 € único</span>
+    <span class="plan-check">✓</span>
+  </div>
+</div>
     <label class="pw-switch">
       <span>Avísame antes de que finalice la prueba gratuita</span>
       <input type="checkbox" id="avisoTrial" checked>
       <i></i>
     </label>
     <button class="pw-cta" id="pwCta" onclick="activarPro()">Prueba Gratis →</button>
-    <p class="pw-linea" id="pwLinea">7 días gratis. Luego, 14,99 €/año (~1,25 €/mes)</p>
+    <p class="pw-linea" id="pwLinea">7 días gratis. Luego, 18,99 €/año (~1,25 €/mes)</p>
     <p class="aviso">Tu suscripción se cargará automáticamente en tu cuenta de Google Play. Para evitar el cargo, cancela al menos 24 horas antes de que finalice el periodo desde tu cuenta de Google Play.</p>
     <div class="legal"><a href="#">Política de privacidad</a> | <a href="#">Condiciones de uso</a> | <a href="#">Términos de la suscripción</a></div>
   </div>
@@ -162,6 +167,6 @@
   <button id="n-ajustes" onclick="show('ajustes')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>Ajustes</button>
 </nav>
 
-<script src="/app.js?v=10"></script>
+<script src="/app.js?v=12"></script>
 </body>
 </html>
