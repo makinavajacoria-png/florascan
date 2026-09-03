@@ -453,13 +453,16 @@ Devuelve exactamente:
   "sintomas": ["máximo 3 síntomas visibles"],
   "diagnostico": "qué le pasa en 1 frase",
   "tratamiento": ["máximo 3 pasos concretos"],
-  "prevencion": ["1 medida preventiva"]
+  "prevencion": ["1 medida preventiva"],
+  "luz": "necesidad de luz de la especie en 3-6 palabras",
+  "riego": "frecuencia de riego de la especie en 3-8 palabras"
 }}
 
 Reglas:
 - Si NO ves síntomas: estado="saludable", sintomas=[], tratamiento=[]
 - Si ves manchas, amarilleo, polvo blanco o necrosis: NO digas saludable
 - Usa "posible / compatible con" si no hay certeza
+- "luz" y "riego" SIEMPRE rellenos según la especie identificada
 - Español, conciso, sin markdown"""
 
 
@@ -843,6 +846,15 @@ async def analizar(imagen: UploadFile = File(...)):
         fuente_ia = "qwen" if ia else None
 
     if ia:
+        # Si no hay cuidados del diccionario, usar los de la IA
+        if not cuidados and ia.get("luz") and ia.get("riego"):
+            cuidados = {
+                "grupo": "Planta",
+                "riego": ia.get("riego"),
+                "luz": ia.get("luz"),
+                "tipico": "Observar respuesta y ajustar"
+            }
+
         estado = normalizar_estado(ia.get("estado"))
         confianza = float(ia.get("confianza", 0.7))
         puntuacion = score_desde_estado(estado, confianza)
@@ -862,7 +874,7 @@ async def analizar(imagen: UploadFile = File(...)):
             "confianza": round(confianza, 2),
             "modelo": ia.get("modelo"),
         }
-        
+
         return {
             "especie": {
                 "fuente": fuente_ia,

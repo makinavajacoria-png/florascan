@@ -34,7 +34,7 @@ function guardarJardin(blob,d){const r=new FileReader();r.onload=()=>{const p=LS
 function pintarJardin(){const p=LS.get('plantas',[]);$('jardinVacio').style.display=p.length?'none':'block';$('jardin').innerHTML=p.map(x=>{const s=x.data.salud,c=s.estado==='saludable'?'#2F7A4D':(s.estado==='atencion'?'#D97706':'#DC2626');const nom=x.data.especie.nombre_comun||'Planta';return '<div class="planta" onclick="verDetalle('+x.id+')"><button class="borrar" onclick="event.stopPropagation();eliminarPlanta('+x.id+')">✕</button><img src="'+x.img+'"><div class="txt"><span class="punto" style="background:'+c+'"></span>'+nom+'</div></div>'}).join('')}
 
 function eliminarPlanta(id){if(confirm('¿Eliminar planta?')){LS.set('plantas',LS.get('plantas',[]).filter(x=>x.id!==id));pintarJardin()}}
-function verDetalle(id){const p=LS.get('plantas',[]).find(x=>x.id===id);if(p){volverA='jardin';fetch(p.img).then(r=>r.blob()).then(b=>ultimoBlob=b);pintar(p.data);show('resultado')}}
+function verDetalle(id){const p=LS.get('plantas',[]).find(x=>x.id===id);if(p){volverA='jardin';$('preview').src=p.img;fetch(p.img).then(r=>r.blob()).then(b=>ultimoBlob=b);pintar(p.data);show('resultado')}}
 
 async function pedirInforme(){if(!ultimoBlob){alert('Primero escanea una planta.');return}if(tier()!=='pro'){if(!confirm('Informe detallado: 0,50 € (simulación). ¿Continuar?'))return}$('estado').textContent='Generando informe...';const fd=new FormData();fd.append('imagen',ultimoBlob,'foto.jpg');try{const r=await fetch('/informe',{method:'POST',body:fd});if(!r.ok)throw new Error('Error '+r.status);const d=await r.json();const a=document.createElement('a');a.href=d.url;a.download='informe_florascan.pdf';document.body.appendChild(a);a.click();document.body.removeChild(a);$('estado').textContent='✅ Informe descargado'}catch(e){alert('Error informe: '+e.message)}}
 
@@ -57,7 +57,7 @@ h+='<div class="card-section"><h3>Estado de salud</h3><div class="health-alert '
 h+=card('Tratamiento recomendado',(s.recomendaciones&&s.recomendaciones.length?s.recomendaciones.map(r=>item('💡','',r)).join(''):item('✅','','Mantén los cuidados habituales')));
 h+=card('Cuidados básicos',item('💧','Riego',cuid.riego||'Moderado')+item('☀️','Luz',cuid.luz||'Indirecta')+item('⚠️','Punto débil',cuid.tipico||'Ninguno'));
 }else if(tabActual==='lugar'){
-h+=card('Luz',item('☀️',cuid.luz||'Sol parcial','','Luz preferida')+item('🌞','Tolerancias','A pleno sol o sombra parcial','También es adecuada para'));
+h+=card('Luz',item('☀️',cuid.luz||'Sol parcial','','Luz preferida')+item('🌞','Tolerancias','Se adapta a sol suave o semisombra','Ajusta la exposición según el clima de tu zona'));
 h+=card('Tierra',item('🪴','Sustrato con buen drenaje','','Tipo de tierra recomendado'));
 h+=card('Temperatura',item('🌡️','Rango ideal','15-25 °C, evita heladas fuertes'));
 }else if(tabActual==='caracteristicas'){
