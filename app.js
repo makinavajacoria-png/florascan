@@ -1,5 +1,5 @@
 const LS={get(k,d){try{const v=JSON.parse(localStorage.getItem('fs_'+k));return v==null?d:v}catch(e){return d}},set(k,v){localStorage.setItem('fs_'+k,JSON.stringify(v))}};
-let stream=null,volverA='jardin',zoomTrack=null,ultimoBlob=null,tabActual='cuidados',datosActuales=null;
+let stream=null,volverA='jardin',zoomTrack=null,ultimoBlob=null,tabActual='cuidados',datosActuales=null,planElegido='anual';
 const video=document.getElementById('video');
 const $=id=>document.getElementById(id);
 
@@ -12,7 +12,8 @@ function tier(){return LS.get('tier','free')}
 function actualizarTier(){$('estadoTier').textContent='Suscripción Estado: '+(tier()==='free'?'Gratis':(tier()==='pro'?'Pro (prueba)':'De por vida'))}
 function abrirPaywall(){$('paywall').classList.add('on')}
 function cerrarPaywall(){$('paywall').classList.remove('on')}
-function activarPro(){LS.set('tier','pro');LS.set('trialFin',Date.now()+7*864e5);actualizarTier();cerrarPaywall();alert('✅ Prueba Pro de 7 días activada (simulación).');show('jardin')}
+function elegirPlan(p){planElegido=p;const a=$('planAnual'),m=$('planMensual');if(a)a.classList.toggle('sel',p==='anual');if(m)m.classList.toggle('sel',p==='mensual');if(p==='anual'){$('pwCta').textContent='Prueba Gratis →';$('pwLinea').textContent='7 días gratis. Luego, 14,99 €/año (~1,25 €/mes)';}else{$('pwCta').textContent='Continuar →';$('pwLinea').textContent='1 mes por 1,99 €. Renovación mensual, cancela cuando quieras.';}}
+function activarPro(){LS.set('tier','pro');LS.set('plan',planElegido);LS.set('trialFin',Date.now()+7*864e5);actualizarTier();cerrarPaywall();alert(planElegido==='mensual'?'✅ Pro mensual activado (simulación).':'✅ Prueba Pro de 7 días activada (simulación).');show('jardin')}
 function restaurar(){alert(tier()==='free'?'No hay compras anteriores.':'✅ Membresía restaurada: '+tier())}
 function limpiarCache(){if(confirm('¿Borrar datos?')){Object.keys(localStorage).filter(k=>k.startsWith('fs_')).forEach(k=>localStorage.removeItem(k));location.reload()}}
 function consumirEscaneo(){if(tier()!=='free')return true;const hoy=new Date().toDateString();const u=LS.get('usado_'+hoy,0);if(u>=3){abrirPaywall();return false}LS.set('usado_'+hoy,u+1);return true}
@@ -51,32 +52,32 @@ const card=(h,inner)=>'<div class="card-section"><h3>'+h+'</h3><div class="info-
 
 function cambiarTab(tab,el){tabActual=tab;document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));if(el)el.classList.add('active');if(datosActuales)renderTabContent(datosActuales)}
 
-function renderTabContent(d){const c=$('tabContent');const s=d.salud||{};const cuid=d.cuidados||{};const e=datosEspecie(d);let h='';
+function renderTabContent(d){const c=$('tabContent'),s=d.salud||{},cu=d.cuidados||{},e=datosEspecie(d);let h='';
 if(tabActual==='cuidados'){
 h+='<div class="card-section"><h3>Estado de salud</h3><div class="health-alert '+(s.estado||'saludable')+'"><div class="health-header"><span class="health-badge '+(s.estado||'saludable')+'">'+(s.estado==='saludable'?'Saludable':(s.estado==='atencion'?'Atención':'Malo'))+'</span><span class="health-title">'+(s.puntuacion||0)+'% salud</span></div><p class="health-desc">'+(s.diagnostico||'Sin problemas detectados')+'</p></div></div>';
-h+=card('Tratamiento recomendado',(s.recomendaciones&&s.recomendaciones.length?s.recomendaciones.map(r=>item('💡','',r)).join(''):item('✅','','Mantén los cuidados habituales')));
-h+=card('Cuidados básicos',item('💧','Riego',cuid.riego||'Moderado')+item('☀️','Luz',cuid.luz||'Indirecta')+item('⚠️','Punto débil',cuid.tipico||'Ninguno'));
+h+=card('Tratamiento recomendado',(s.recomendaciones||[]).length?s.recomendaciones.map(r=>item('💡','',r)).join(''):item('✅','','Mantén los cuidados habituales'));
+h+=card('Cuidados básicos',item('💧','Riego',cu.riego||'Moderado: riega al secarse la capa superior')+item('☀️','Luz',cu.luz||'Luz brillante sin sol directo')+item('⚠️','Punto débil',cu.tipico||'Ninguno'));
 }else if(tabActual==='lugar'){
-h+=card('Luz',item('☀️',cuid.luz||'Sol parcial','','Luz preferida')+item('🌞','Tolerancias','Se adapta a sol suave o semisombra','Ajusta la exposición según el clima de tu zona'));
-h+=card('Tierra',item('🪴','Sustrato con buen drenaje','','Tipo de tierra recomendado'));
+h+=card('Luz',item('☀️',cu.luz||'Luz brillante sin sol directo','','Luz preferida')+item('🌞','Tolerancias','Se adapta a sol suave o semisombra','Ajusta la exposición según el clima de tu zona'));
+h+=card('Tierra',item('🪴','Sustrato con buen drenaje'));
 h+=card('Temperatura',item('🌡️','Rango ideal','15-25 °C, evita heladas fuertes'));
 }else if(tabActual==='caracteristicas'){
 h+=card('Nombre',item('📖',e.cient||'-','','Nombre científico')+item('🏷️',e.nom,'','Nombre común')+item('🌿',e.genero||'-','','Género'));
-h+=card('Tipo',item('🍀',cuid.grupo||'Planta','','Tipo de planta'));
+h+=card('Tipo',item('🍀',cu.grupo||'Planta','','Tipo de planta'));
 h+=card('Hojas',item('🍃','Perenne','','Tipo de follaje'));
 }else{
-const probs=(s.sintomas&&s.sintomas.length?s.sintomas:['Luz insuficiente','Manchas','Cicatrices']).slice(0,4);
-h+='<div class="card-section"><h3>Problemas comunes</h3><div class="scroll-horizontal">'+probs.map((p,i)=>'<div class="problem-card" style="height:120px;background:linear-gradient(135deg,'+['#D8F3DC','#FDE68A','#FECACA','#E9D5FF'][i%4]+',#fff)"><div class="label" style="color:#1F2937;background:none">'+p+'</div></div>').join('')+'</div></div>';
+const pr=(s.sintomas||['Luz insuficiente','Manchas','Cicatrices']).slice(0,4);
+h+='<div class="card-section"><h3>Problemas comunes</h3><div class="scroll-horizontal">'+pr.map((p,i)=>'<div class="problem-card" style="height:120px;background:linear-gradient(135deg,'+['#D8F3DC','#FDE68A','#FECACA','#E9D5FF'][i%4]+',#fff)"><div class="label" style="color:#1F2937;background:none">'+p+'</div></div>').join('')+'</div></div>';
 h+=card('Herramienta de diagnóstico',item('🏥','Autodiagnóstico','Analiza una nueva foto para comprobar su salud')+'<button class="btn btn-verde" style="margin-top:12px" onclick="abrirCamara()">📷 Autodiagnóstico</button>');
-h+=card('¿Buscas ayuda adicional?',item('💡','Informe detallado','Descarga el informe completo en PDF con todos los cuidados')+'<button class="btn btn-informe" style="margin-top:12px" onclick="pedirInforme()">📄 Descargar informe</button>');
 }
 c.innerHTML=h}
 
 function pintar(d){datosActuales=d;document.querySelector('.result-header').classList.remove('scanning');const e=datosEspecie(d);$('estado').textContent='';
+const chip=$('chipFuente');if(chip)chip.textContent='Ficha botánica · fuente: '+(d.salud.fuente||'local')+(d.salud.modelo?' ('+d.salud.modelo+')':'');
 $('nombre').textContent=e.nom;
-$('subtitulo').textContent='especie de '+(e.genero||'plantas')+' ('+(e.cient.split(' ')[0]||'-')+')';
+$('subtitulo').textContent=e.cient?'especie de '+(e.genero||'plantas')+' ('+e.cient.split(' ')[0]+')':'Especie pendiente de confirmación';
 $('nombreComun').textContent=e.nom;$('nombreBotanico').textContent=e.cient||'-';
-const cuid=d.cuidados||{};$('textoLuz').textContent=cuid.luz||'No disponible';$('textoRiego').textContent=cuid.riego||'No disponible';
+const cuid=d.cuidados||{};$('textoLuz').textContent=cuid.luz||'Luz brillante sin sol directo';$('textoRiego').textContent=cuid.riego||'Moderado: riega al secarse la capa superior';
 $('btnInforme').textContent=tier()==='pro'?'📄 Informe detallado (incluido en Pro)':'📄 Informe detallado (0,50 €)';
 cambiarTab('cuidados',document.querySelector('.tab'))}
 

@@ -441,6 +441,8 @@ def normalizar_estado(estado):
     if e in ("atencion", "atención", "moderado", "leve", "enfermo", "enferma"): return "atencion"
     return "atencion"
 
+MODO_PRUEBA_QWEN = False   # ⚠️ Ponla en False cuando termines de probar
+
 
 PROMPT_DIAGNOSTICO = """Eres un experto en jardinería y fitopatología.
 Analiza la imagen y responde SOLO en JSON válido.{contexto}
@@ -508,7 +510,7 @@ def texto_libre_como_respaldo(texto, especie_contexto, modelo_nombre):
 # GEMINI (principal)
 # ============================================================
 
-MODELOS_GEMINI = ["gemini-3.6-flash", "gemini-3.5-flash"]
+MODELOS_GEMINI = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
 
 
 def _texto_de_respuesta_gemini(r):
@@ -837,7 +839,7 @@ async def analizar(imagen: UploadFile = File(...)):
                     "luz": perfil["luz"], "tipico": perfil["tipico"]}
 
     # Si Gemini ya respondió, usarlo
-    if ia_gemini:
+    if ia_gemini and not MODO_PRUEBA_QWEN:
         fuente_ia = "gemini"
         ia = ia_gemini
     else:

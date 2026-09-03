@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>FloraScan</title>
-<link rel="stylesheet" href="/styles.css?v=9">
+<link rel="stylesheet" href="/styles.css?v=10">
 </head>
 <body>
 <div class="app">
@@ -117,17 +117,40 @@
 
 <!-- PAYWALL -->
 <div class="pw" id="paywall">
-  <div class="pw-top"><button onclick="restaurar()">Restaurar</button><button onclick="cerrarPaywall()">✕</button></div>
-  <h2>CÓMO FUNCIONA LA PRUEBA GRATIS</h2>
-  <div class="timeline">
-    <div class="tl"><div class="tl-ico">🔓</div><div><b>Hoy</b><p>Desbloquea el acceso ilimitado a todas las funciones de FloraScan Pro</p></div></div>
-    <div class="tl"><div class="tl-ico">🎉</div><div><b>Día 1 - Día 6</b><p>Disfruta de Pro y aprovecha al máximo la prueba gratuita</p></div></div>
-    <div class="tl"><div class="tl-ico">⏰</div><div><b>Día 7</b><p>Se te cobrará. Cancela en cualquier momento 24 horas antes</p></div></div>
+  <div class="pw-top"><button onclick="restaurar()">Restablecer</button><button onclick="cerrarPaywall()">✕</button></div>
+  <div class="pw-hero">
+    <span class="brand-logo"><svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M12 17c0-5 3.5-8.5 8-8.5 0 5-3.5 8.5-8 8.5z"/><path d="M12 17c0-3-2-5-5-5 0 3 2 5 5 5z"/></svg></span>
+    <h2 class="pw-brand">Flora<span>Scan</span></h2>
   </div>
-  <p class="precio"><b>Prueba 7 días gratis</b><br>Luego EUR <b>14,99</b>/año. Cancela cuando quieras.</p>
-  <div style="padding:0 24px"><button class="btn btn-grad" onclick="activarPro()">INICIAR PRUEBA GRATUITA</button></div>
-  <p class="aviso" style="padding:14px 24px 0">Tu suscripción se cargará automáticamente a tu cuenta de Google Play. Para evitar ser cargado, cancela al menos 24 horas antes de que finalice la prueba.</p>
-  <div class="legal"><a href="#">Política de privacidad</a> | <a href="#">Condiciones de uso</a> | <a href="#">Términos de la suscripción</a></div>
+  <div class="pw-body">
+    <ul class="pw-beneficios">
+      <li><span class="check">✓</span><span>Identificación de <b>miles de especies</b> con una sola foto</span></li>
+      <li><span class="check">✓</span><span>Diagnóstico de <b>enfermedades y plagas</b> al instante</span></li>
+      <li><span class="check">✓</span><span>Jardín, recordatorios e informes <b>sin límites</b></span></li>
+    </ul>
+    <div class="pw-planes">
+      <div class="plan sel" id="planAnual" onclick="elegirPlan('anual')">
+        <span class="plan-tag">MÁS POPULAR</span>
+        <b>7 días gratis</b>
+        <span class="plan-precio">Luego 14,99 €/año</span>
+        <span class="plan-check">✓</span>
+      </div>
+      <div class="plan" id="planMensual" onclick="elegirPlan('mensual')">
+        <b>1 mes</b>
+        <span class="plan-precio">1,99 €</span>
+        <span class="plan-check">✓</span>
+      </div>
+    </div>
+    <label class="pw-switch">
+      <span>Avísame antes de que finalice la prueba gratuita</span>
+      <input type="checkbox" id="avisoTrial" checked>
+      <i></i>
+    </label>
+    <button class="pw-cta" id="pwCta" onclick="activarPro()">Prueba Gratis →</button>
+    <p class="pw-linea" id="pwLinea">7 días gratis. Luego, 14,99 €/año (~1,25 €/mes)</p>
+    <p class="aviso">Tu suscripción se cargará automáticamente en tu cuenta de Google Play. Para evitar el cargo, cancela al menos 24 horas antes de que finalice el periodo desde tu cuenta de Google Play.</p>
+    <div class="legal"><a href="#">Política de privacidad</a> | <a href="#">Condiciones de uso</a> | <a href="#">Términos de la suscripción</a></div>
+  </div>
 </div>
 
 <!-- NAV INFERIOR -->
@@ -139,6 +162,6 @@
   <button id="n-ajustes" onclick="show('ajustes')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>Ajustes</button>
 </nav>
 
-<script src="/app.js?v=9"></script>
+<script src="/app.js?v=10"></script>
 </body>
 </html>
