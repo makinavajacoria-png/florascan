@@ -4,15 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>FloraScan</title>
-   <link rel="stylesheet" href="/styles.css?v=6">
+<link rel="stylesheet" href="/styles.css?v=9">
 </head>
 <body>
 <div class="app">
 
-<!-- MI JARDÍN / RECORDATORIOS -->
+<!-- MI JARDÍN -->
 <section class="sc grad" id="s-jardin">
-  <h1>Mi Jardín</h1>
-  <p class="sub">Cuida cada una de tus plantas</p>
+  <div class="brand">
+  <span class="brand-logo"><svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M12 17c0-5 3.5-8.5 8-8.5 0 5-3.5 8.5-8 8.5z"/><path d="M12 17c0-3-2-5-5-5 0 3 2 5 5 5z"/></svg></span>
+  <div><h1>Mi Jardín</h1><p class="sub">Tu cuaderno botánico personal</p></div>
+</div>
   <div class="vacio" id="jardinVacio">
     <div class="emoji">🪴</div>
     <h2>Empecemos</h2>
@@ -22,36 +24,44 @@
   <div class="jardin" id="jardin"></div>
 </section>
 
-<!-- GUÍA DE CUIDADOS -->
+<!-- GUÍA -->
 <section class="sc" id="s-guia">
   <h1>Guía</h1>
   <p class="sub">Cuidados de las plantas más comunes</p>
   <div id="guias"></div>
 </section>
 
-<!-- RESULTADO -->
+<!-- RESULTADO DETALLADO -->
 <section class="sc" id="s-resultado">
-  <button class="btn btn-suave" style="width:auto;padding:8px 16px;margin-bottom:10px" onclick="show('jardin')">← Volver</button>
-  <img id="preview" class="preview" alt="">
-  <p id="estado"></p>
-  <div class="card" id="card" style="display:none">
-    <span class="chip" id="fuente"></span>
-    <div class="nombre" id="nombre"></div>
-    <div class="cientifico" id="cientifico"></div>
-    <div class="ringwrap">
-      <svg width="150" height="150" viewBox="0 0 150 150">
-        <circle cx="75" cy="75" r="62" stroke="#E5EAE4" stroke-width="12" fill="none"/>
-        <circle id="ring" cx="75" cy="75" r="62" stroke="#2EB872" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="389.6" stroke-dashoffset="389.6" transform="rotate(-90 75 75)"/>
-        <text id="score" x="75" y="72" text-anchor="middle" font-size="30" font-weight="800" fill="#123B2C"></text>
-        <text id="estadoSalud" x="75" y="96" text-anchor="middle" font-size="13" fill="#6B7280"></text>
-      </svg>
-    </div>
-    <h3>🍃 Síntomas detectados</h3><ul id="sintomas" class="lista"></ul>
-    <h3>💡 Tratamiento</h3><ul id="recomendaciones" class="lista"></ul>
-    <h3>💧 Cuidados</h3><ul id="cuidados" class="lista"></ul>
-        <button class="btn btn-informe" id="btnInforme" onclick="pedirInforme()">📄 Informe detallado (0,50 €)</button>
-    <p class="aviso">⚠️ Análisis orientativo. No sustituye la evaluación de un experto.</p>
+  <div class="result-header">
+    <button class="back-btn" onclick="show(volverA)">←</button>
+    <img id="preview" class="result-img" alt="">
   </div>
+  <p id="estado"></p>
+  <div class="result-content">
+    <span class="ficha-chip">Ficha botánica</span>
+<h1 id="nombre" class="result-title"></h1>
+    <p id="subtitulo" class="result-subtitle"></p>
+    <div class="info-rows">
+      <div class="info-row"><span class="label">Nombre común:</span><span class="value" id="nombreComun"></span></div>
+      <div class="info-row"><span class="label">Nombre botánico:</span><span class="value" id="nombreBotanico"></span></div>
+    </div>
+    <div class="badges">
+      <div class="badge"><span class="badge-icon">☀️</span><span id="textoLuz">-</span></div>
+      <div class="badge"><span class="badge-icon">💧</span><span id="textoRiego">-</span></div>
+    </div>
+    <button class="btn btn-informe" id="btnInforme" onclick="pedirInforme()">📄 Informe detallado (0,50 €)</button>
+    <div class="tabs-sticky">
+      <div class="tabs">
+        <button class="tab active" onclick="cambiarTab('cuidados',this)">Cuidados</button>
+        <button class="tab" onclick="cambiarTab('lugar',this)">Lugar</button>
+        <button class="tab" onclick="cambiarTab('caracteristicas',this)">Características</button>
+        <button class="tab" onclick="cambiarTab('plagas',this)">Plagas</button>
+      </div>
+    </div>
+    <div class="tab-content" id="tabContent"></div>
+  </div>
+  <button class="fab" onclick="abrirCamara()">+ Añadir planta</button>
 </section>
 
 <!-- AJUSTES -->
@@ -129,6 +139,6 @@
   <button id="n-ajustes" onclick="show('ajustes')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>Ajustes</button>
 </nav>
 
-<script src="/app.js?v=6"></script>
+<script src="/app.js?v=9"></script>
 </body>
 </html>
