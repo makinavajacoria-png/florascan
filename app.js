@@ -1,5 +1,6 @@
 const LS={get(k,d){try{const v=JSON.parse(localStorage.getItem('fs_'+k));return v==null?d:v}catch(e){return d}},set(k,v){localStorage.setItem('fs_'+k,JSON.stringify(v))}};
 let stream=null,volverA='jardin',zoomTrack=null,ultimoBlob=null,tabActual='cuidados',datosActuales=null,planElegido='anual';
+let idPlantaActual = null
 const video=document.getElementById('video');
 const $=id=>document.getElementById(id);
 
@@ -35,10 +36,120 @@ async function analizar(blobO){if(!consumirEscaneo())return;const blob=await pre
 
 function guardarJardin(blob,d){const r=new FileReader();r.onload=()=>{const p=LS.get('plantas',[]);p.unshift({id:Date.now(),img:r.result,data:d,fecha:Date.now()});if(p.length>30)p.length=30;LS.set('plantas',p)};r.readAsDataURL(blob)}
 
-function pintarJardin(){const p=LS.get('plantas',[]);$('jardinVacio').style.display=p.length?'none':'block';$('jardin').innerHTML=p.map(x=>{const s=x.data.salud,c=s.estado==='saludable'?'#2F7A4D':(s.estado==='atencion'?'#D97706':'#DC2626');const nom=x.data.especie.nombre_comun||'Planta';return '<div class="planta" onclick="verDetalle('+x.id+')"><button class="borrar" onclick="event.stopPropagation();eliminarPlanta('+x.id+')">✕</button><img src="'+x.img+'"><div class="txt"><span class="punto" style="background:'+c+'"></span>'+nom+'</div></div>'}).join('')}
+function pintarJardin(){
+  const p = LS.get('plantas', []);
+  $('jardinVacio').style.display = p.length ? 'none' : 'block';
+  
+  // Ordenar: primero las que necesitan riego urgente
+  p.sort((a, b) => {
+    const nextA = a.data.recordatorio?.proxima || 0;
+    const nextB = b.data.recordatorio?.proxima || 0;
+    return nextA - nextB;
+  });
+
+  $('jardin').innerHTML = p.map(x => {
+    const s = x.data.salud;
+    const colorEstado = s.estado === 'saludable' ? '#2F7A4D' : (s.estado === 'atencion' ? '#D97706' : '#DC2626');
+    const nom = x.data.especie.nombre_comun || 'Planta';
+    
+    // Lógica de Riego
+    const rec = x.data.recordatorio || {frecuencia: 7, ultimaVez: Date.now() - 86400000*7, proxima: Date.now()};
+    const hoy = Date.now();
+    const diffDias = Math.ceil((rec.proxima - hoy) / 86400000);
+    
+    let textoRiego = `💧 ${diffDias}d`;
+    let colorRiego = '#9CA3AF'; // Gris
+    
+    if (diffDias <= 0) {
+      textoRiego = diffDias === 0 ? '💧 ¡Hoy!' : '💧 Atrasado';
+      colorRiego = '#DC2626'; // Rojo si urge
+    } else if (diffDias === 1) {
+      textoRiego = '💧 Mañana';
+      colorRiego = '#D97706'; // Naranja aviso
+    }
+
+    return `
+      <div class="planta" onclick="verDetalle(${x.id})">
+        <button class="borrar" onclick="event.stopPropagation();eliminarPlanta(${x.id})">✕</button>
+        <img src="${x.img}">
+        <div class="txt">
+          <span class="punto" style="background:${colorEstado}"></span>${nom}
+          <div style="font-size:11px;color:${colorRiego};font-weight:600;margin-top:4px;display:flex;justify-content:space-between;align-items:center">
+            ${textoRiego}
+            <button class="btn-mini-regar" onclick="event.stopPropagation();regarPlanta(${x.id})" style="background:${colorRiego};color:#fff;border:none;border-radius:10px;padding:2px 6px;font-size:10px;cursor:pointer">Regar</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
 
 function eliminarPlanta(id){if(confirm('¿Eliminar planta?')){LS.set('plantas',LS.get('plantas',[]).filter(x=>x.id!==id));pintarJardin()}}
-function verDetalle(id){const p=LS.get('plantas',[]).find(x=>x.id===id);if(p){volverA='jardin';$('preview').src=p.img;fetch(p.img).then(r=>r.blob()).then(b=>ultimoBlob=b);pintar(p.data);show('resultado')}}
+function regarPlanta(id) {
+  const plantas = LS.get('plantas', []);
+  const idx = plantas.findIndex(x => x.id === id);
+  if (idx !== -1) {
+    const p = plantas[idx];
+    // Si no tiene recordatorio, lo creamos (frecuencia 7 días)
+    if (!p.data.recordatorio) {
+      p.data.recordatorio = {frecuencia: 7};
+    }
+    // Actualizamos: última vez = ahora, próxima = ahora + frecuencia
+    const ahora = Date.now();
+    p.data.recordatorio.ultimaVez = ahora;
+    p.data.recordatorio.proxima = ahora + (p.data.recordatorio.frecuencia * 86400000);
+    
+    LS.set('plantas', plantas);
+    pintarJardin(); // Refrescar vista
+  }
+}
+function cambiarFrecuencia(delta) {
+  if (!idPlantaActual) return;
+  const plantas = LS.get('plantas', []);
+  const idx = plantas.findIndex(x => x.id === idPlantaActual);
+  if (idx !== -1) {
+    const p = plantas[idx];
+    if (!p.data.recordatorio) p.data.recordatorio = {frecuencia: 7, ultimaVez: Date.now() - 86400000*7, proxima: Date.now()};
+    
+    let nuevaFreq = p.data.recordatorio.frecuencia + delta;
+    if (nuevaFreq < 1) nuevaFreq = 1;
+    if (nuevaFreq > 30) nuevaFreq = 30;
+    
+    p.data.recordatorio.frecuencia = nuevaFreq;
+    // Recalcular próxima fecha desde la última vez que se regó
+    if (p.data.recordatorio.ultimaVez) {
+      p.data.recordatorio.proxima = p.data.recordatorio.ultimaVez + (nuevaFreq * 86400000);
+    }
+    
+    LS.set('plantas', plantas);
+    const el = document.getElementById('freqValor');
+    if (el) el.textContent = nuevaFreq + (nuevaFreq === 1 ? ' día' : ' días');
+  }
+}
+function timeAgo(timestamp) {
+  const segundos = Math.floor((Date.now() - timestamp) / 1000);
+  const dias = Math.floor(segundos / 86400);
+  if (dias === 0) return 'Hoy';
+  if (dias === 1) return 'Ayer';
+  if (dias < 30) return `Hace ${dias} días`;
+  return `Hace ${Math.floor(dias/30)} meses`;
+}
+
+function setFrecuencia(dias) {
+  if (!idPlantaActual) return;
+  const plantas = LS.get('plantas', []);
+  const idx = plantas.findIndex(x => x.id === idPlantaActual);
+  if (idx !== -1) {
+    const p = plantas[idx];
+    if (!p.data.recordatorio) p.data.recordatorio = {frecuencia: 7, ultimaVez: Date.now() - 86400000*7, proxima: Date.now()};
+    p.data.recordatorio.frecuencia = parseInt(dias);
+    if (p.data.recordatorio.ultimaVez) {
+      p.data.recordatorio.proxima = p.data.recordatorio.ultimaVez + (parseInt(dias) * 86400000);
+    }
+    LS.set('plantas', plantas);
+    // No redibujamos toda la pestaña, solo actualizamos el valor en el jardín si volvemos
+  }
+}
+function verDetalle(id){const p=LS.get('plantas',[]).find(x=>x.id===id);if(p){volverA='jardin';idPlantaActual = id;$('preview').src=p.img;fetch(p.img).then(r=>r.blob()).then(b=>ultimoBlob=b);pintar(p.data);show('resultado')}}
 
 async function pedirInforme(){if(!ultimoBlob){alert('Primero escanea una planta.');return}if(tier()!=='pro'){if(!confirm('Informe detallado: 0,50 € (simulación). ¿Continuar?'))return}$('estado').textContent='Generando informe...';const fd=new FormData();fd.append('imagen',ultimoBlob,'foto.jpg');try{const r=await fetch('/informe',{method:'POST',body:fd});if(!r.ok)throw new Error('Error '+r.status);const d=await r.json();const a=document.createElement('a');a.href=d.url;a.download='informe_florascan.pdf';document.body.appendChild(a);a.click();document.body.removeChild(a);$('estado').textContent='✅ Informe descargado'}catch(e){alert('Error informe: '+e.message)}}
 
@@ -55,27 +166,37 @@ const card=(h,inner)=>'<div class="card-section"><h3>'+h+'</h3><div class="info-
 
 function cambiarTab(tab,el){tabActual=tab;document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));if(el)el.classList.add('active');if(datosActuales)renderTabContent(datosActuales)}
 
-function renderTabContent(d){const c=$('tabContent'),s=d.salud||{},cu=d.cuidados||{},e=datosEspecie(d);let h='';
-if(tabActual==='cuidados'){
-h+='<div class="card-section"><h3>Estado de salud</h3><div class="health-alert '+(s.estado||'saludable')+'"><div class="health-header"><span class="health-badge '+(s.estado||'saludable')+'">'+(s.estado==='saludable'?'Saludable':(s.estado==='atencion'?'Atención':'Malo'))+'</span><span class="health-title">'+(s.puntuacion||0)+'% salud</span></div><p class="health-desc">'+(s.diagnostico||'Sin problemas detectados')+'</p></div></div>';
-h+=card('Tratamiento recomendado',(s.recomendaciones||[]).length?s.recomendaciones.map(r=>item('💡','',r)).join(''):item('✅','','Mantén los cuidados habituales'));
-h+=card('Cuidados básicos',item('💧','Riego',cu.riego||'Moderado: riega al secarse la capa superior')+item('☀️','Luz',cu.luz||'Luz brillante sin sol directo')+item('⚠️','Punto débil',cu.tipico||'Ninguno'));
-}else if(tabActual==='lugar'){
-h+=card('Luz',item('☀️',cu.luz||'Luz brillante sin sol directo','','Luz preferida')+item('🌞','Tolerancias','Se adapta a sol suave o semisombra','Ajusta la exposición según el clima de tu zona'));
-h+=card('Tierra',item('🪴','Sustrato con buen drenaje'));
-h+=card('Temperatura',item('🌡️','Rango ideal','15-25 °C, evita heladas fuertes'));
-}else if(tabActual==='caracteristicas'){
-h+=card('Nombre',item('📖',e.cient||'-','','Nombre científico')+item('🏷️',e.nom,'','Nombre común')+item('🌿',e.genero||'-','','Género'));
-h+=card('Tipo',item('🍀',cu.grupo||'Planta','','Tipo de planta'));
-h+=card('Hojas',item('🍃','Perenne','','Tipo de follaje'));
-}else{
-const pr=(s.sintomas||['Luz insuficiente','Manchas','Cicatrices']).slice(0,4);
-h+='<div class="card-section"><h3>Problemas comunes</h3><div class="scroll-horizontal">'+pr.map((p,i)=>'<div class="problem-card" style="height:120px;background:linear-gradient(135deg,'+['#D8F3DC','#FDE68A','#FECACA','#E9D5FF'][i%4]+',#fff)"><div class="label" style="color:#1F2937;background:none">'+p+'</div></div>').join('')+'</div></div>';
-h+=card('Herramienta de diagnóstico',item('🏥','Autodiagnóstico','Analiza una nueva foto para comprobar su salud')+'<button class="btn btn-verde" style="margin-top:12px" onclick="abrirCamara()">📷 Autodiagnóstico</button>');
+function renderTabContent(d){
+  const c=$('tabContent'),s=d.salud||{},cu=d.cuidados||{},e=datosEspecie(d);
+  let h='';
+  
+  if(tabActual==='cuidados'){
+    h+='<div class="card-section"><h3>Estado de salud</h3><div class="health-alert '+(s.estado||'saludable')+'"><div class="health-header"><span class="health-badge '+(s.estado||'saludable')+'">'+(s.estado==='saludable'?'Saludable':(s.estado==='atencion'?'Atención':'Malo'))+'</span><span class="health-title">'+(s.puntuacion||0)+'% salud</span></div><p class="health-desc">'+(s.diagnostico||'Sin problemas detectados')+'</p></div></div>';
+    h+=card('Tratamiento recomendado',(s.recomendaciones||[]).length?s.recomendaciones.map(r=>item('💡','',r)).join(''):item('✅','','Mantén los cuidados habituales'));
+    const icoRegadera='<svg viewBox="0 0 24 24" width="28" height="28"><path d="M3 14h12l4-4V8H7l-4 4v2z" fill="#60A5FA"/><path d="M15 14v4a2 2 0 01-2 2H7a2 2 0 01-2-2v-4" fill="#3B82F6"/><path d="M19 8l2-2" stroke="#9CA3AF" stroke-width="2" stroke-linecap="round"/><circle cx="10" cy="18" r="1" fill="#60A5FA"/><circle cx="13" cy="19" r="1" fill="#60A5FA"/><circle cx="16" cy="18" r="1" fill="#60A5FA"/></svg>';
+    const icoSolGafas='<svg viewBox="0 0 24 24" width="28" height="28"><circle cx="12" cy="12" r="5" fill="#FCD34D"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="#FCD34D" stroke-width="2" stroke-linecap="round"/><rect x="8" y="10" width="3" height="2" rx="1" fill="#1F2937"/><rect x="13" y="10" width="3" height="2" rx="1" fill="#1F2937"/><path d="M11 11h2" stroke="#1F2937" stroke-width="1.5"/></svg>';
+    h+=card('Cuidados básicos',item(icoRegadera,'Riego',cu.riego||'Moderado: riega al secarse la capa superior')+item(icoSolGafas,'Luz',cu.luz||'Luz brillante sin sol directo')+item('⚠️','Punto débil',cu.tipico||'Ninguno'));
+    const freq=(datosActuales&&datosActuales.recordatorio)?datosActuales.recordatorio.frecuencia:7;
+    const ultRiego=(datosActuales&&datosActuales.recordatorio&&datosActuales.recordatorio.ultimaVez)?timeAgo(datosActuales.recordatorio.ultimaVez):'Nunca';
+    const icoCalendarioGota='<svg viewBox="0 0 24 24" width="28" height="28"><rect x="4" y="5" width="16" height="16" rx="2" fill="#EAF3EC" stroke="#2F7A4D" stroke-width="1.5"/><path d="M8 3v4M16 3v4M4 10h16" stroke="#2F7A4D" stroke-width="1.5" stroke-linecap="round"/><path d="M12 13c-1.5 1.5-2.5 3-2.5 4.5a2.5 2.5 0 005 0c0-1.5-1-3-2.5-4.5z" fill="#3B82F6"/></svg>';
+    h+='<div class="card-section"><h3>Frecuencia de riego</h3><div class="info-card"><div class="info-item"><div class="icon">'+icoCalendarioGota+'</div><div class="content" style="flex:1"><div class="title" id="freqTitulo">Cada '+freq+' '+(freq===1?'día':'días')+'</div><div class="desc">Último riego: '+ultRiego+'</div><input type="range" min="1" max="30" value="'+freq+'" class="freq-slider" oninput="document.getElementById(\'freqTitulo\').textContent=\'Cada \'+this.value+\' \'+(this.value==1?\'día\':\'días\')" onchange="setFrecuencia(this.value)" style="width:100%;margin-top:12px"></div></div></div></div>';
+  }else if(tabActual==='lugar'){
+    h+=card('Luz',item('☀️',cu.luz||'Luz brillante sin sol directo','','Luz preferida')+item('🌞','Tolerancias','Se adapta a sol suave o semisombra','Ajusta la exposición según el clima de tu zona'));
+    h+=card('Tierra',item('🪴','Sustrato con buen drenaje'));
+    h+=card('Temperatura',item('🌡️','Rango ideal','15-25 °C, evita heladas fuertes'));
+  }else if(tabActual==='caracteristicas'){
+    h+=card('Nombre',item('📖',e.cient||'-','','Nombre científico')+item('🏷️',e.nom,'','Nombre común')+item('',e.genero||'-','','Género'));
+    h+=card('Tipo',item('',cu.grupo||'Planta','','Tipo de planta'));
+    h+=card('Hojas',item('🍃','Perenne','','Tipo de follaje'));
+  }else{
+    const pr=(s.sintomas||['Luz insuficiente','Manchas','Cicatrices']).slice(0,4);
+    h+='<div class="card-section"><h3>Problemas comunes</h3><div class="scroll-horizontal">'+pr.map((p,i)=>'<div class="problem-card" style="height:120px;background:linear-gradient(135deg,'+['#D8F3DC','#FDE68A','#FECACA','#E9D5FF'][i%4]+',#fff)"><div class="label" style="color:#1F2937;background:none">'+p+'</div></div>').join('')+'</div></div>';
+    h+=card('Herramienta de diagnóstico',item('🏥','Autodiagnóstico','Analiza una nueva foto para comprobar su salud')+'<button class="btn btn-verde" style="margin-top:12px" onclick="abrirCamara()">📷 Autodiagnóstico</button>');
+  }
+  c.innerHTML=h;
 }
-c.innerHTML=h}
 
-function pintar(d){datosActuales=d;document.querySelector('.result-header').classList.remove('scanning');const e=datosEspecie(d);$('estado').textContent='';
+function pintar(d){datosActuales=d;const plantas=LS.get('plantas',[]);const ultima=plantas.find(p=>p.data===d)||(plantas[0]&&plantas[0].data.especie.nombre_comun===datosEspecie(d).nom?plantas[0]:null);if(ultima)idPlantaActual=ultima.id;document.querySelector('.result-header').classList.remove('scanning');const e=datosEspecie(d);$('estado').textContent='';
 const chip=$('chipFuente');if(chip)chip.textContent='Ficha botánica · fuente: '+(d.salud.fuente||'local')+(d.salud.modelo?' ('+d.salud.modelo+')':'');
 $('nombre').textContent=e.nom;
 $('subtitulo').textContent=e.cient?'especie de '+(e.genero||'plantas')+' ('+e.cient.split(' ')[0]+')':'Especie pendiente de confirmación';
