@@ -153,9 +153,33 @@ function verDetalle(id){const p=LS.get('plantas',[]).find(x=>x.id===id);if(p){vo
 
 async function pedirInforme(){if(!ultimoBlob){alert('Primero escanea una planta.');return}if(tier()!=='pro'){if(!confirm('Informe detallado: 0,50 € (simulación). ¿Continuar?'))return}$('estado').textContent='Generando informe...';const fd=new FormData();fd.append('imagen',ultimoBlob,'foto.jpg');try{const r=await fetch('/informe',{method:'POST',body:fd});if(!r.ok)throw new Error('Error '+r.status);const d=await r.json();const a=document.createElement('a');a.href=d.url;a.download='informe_florascan.pdf';document.body.appendChild(a);a.click();document.body.removeChild(a);$('estado').textContent='✅ Informe descargado'}catch(e){alert('Error informe: '+e.message)}}
 
-const GUIAS=[['Potos','Riego cuando esté seco arriba','Luz indirecta'],['Monstera','Sustrato húmedo, sin charcos','Luz brillante'],['Lengua de suegra','Muy escaso','Poca luz'],['Aloe vera','Sustrato seco','Pleno sol'],['Lavanda','Escaso','Pleno sol'],['Olivo','Escaso','Pleno sol'],['Rosal','Regular al pie','Pleno sol'],['Adelfa','Moderado','Pleno sol']];
-function pintarGuias(){$('guias').innerHTML=GUIAS.map(g=>'<div class="card"><b>'+g[0]+'</b><p style="font-size:14px;color:#6B7280;margin-top:4px">💧 '+g[1]+'</p><p style="font-size:14px;color:#6B7280">☀️ '+g[2]+'</p></div>').join('')}
-
+const GUIAS=[
+{g:'De interior',n:'Potos',r:'Riega cuando esté seco arriba',l:'Luz indirecta',w:'Epipremnum aureum'},
+{g:'De interior',n:'Monstera',r:'Sustrato húmedo, sin charcos',l:'Luz brillante',w:'Monstera deliciosa'},
+{g:'De interior',n:'Lengua de suegra',r:'Muy escaso',l:'Poca luz',w:'Sansevieria trifasciata'},
+{g:'De interior',n:'Aloe vera',r:'Sustrato seco',l:'Pleno sol',w:'Aloe vera'},
+{g:'De interior',n:'Orquídea',r:'Inmersión semanal, sin charcos',l:'Luz indirecta',w:'Phalaenopsis'},
+{g:'De interior',n:'Helecho',r:'Frecuente, sustrato húmedo',l:'Sombra o semisombra',w:'Nephrolepis exaltata'},
+{g:'De exterior',n:'Olivo',r:'Escaso',l:'Pleno sol',w:'Olea europaea'},
+{g:'De exterior',n:'Lavanda',r:'Escaso',l:'Pleno sol',w:'Lavandula'},
+{g:'De exterior',n:'Romero',r:'Escaso',l:'Pleno sol',w:'Salvia rosmarinus'},
+{g:'De exterior',n:'Geranio',r:'Moderado, sin charcos',l:'Pleno sol',w:'Pelargonium'},
+{g:'De exterior',n:'Rosal',r:'Regular, al pie',l:'Pleno sol',w:'Rosa'},
+{g:'De exterior',n:'Adelfa',r:'Moderado',l:'Pleno sol',w:'Nerium oleander'},
+{g:'De exterior',n:'Buganvilla',r:'Escaso',l:'Pleno sol',w:'Bougainvillea'},
+{g:'De exterior',n:'Limonero',r:'Regular',l:'Pleno sol',w:'Citrus × limon'},
+{g:'De exterior',n:'Almendro',r:'Escaso',l:'Pleno sol',w:'Prunus dulcis'},
+{g:'De exterior',n:'Higuera',r:'Moderado',l:'Pleno sol',w:'Ficus carica'},
+{g:'De exterior',n:'Hortensia',r:'Abundante',l:'Semisombra',w:'Hydrangea'},
+{g:'De exterior',n:'Cactus',r:'Muy escaso',l:'Pleno sol',w:'Cactaceae'}
+];
+function pintarGuias(){let h='',grupo='';
+GUIAS.forEach((p,i)=>{if(p.g!==grupo){grupo=p.g;h+='<h3 class="guia-grupo">'+grupo+'</h3>';}
+const key='wg_'+i;const cache=LS.get(key,'');
+h+='<div class="guia-card">'+(cache?'<img class="guia-img" data-key="'+key+'" src="'+cache+'" alt="">':'<div class="guia-img guia-ph" data-key="'+key+'">🌿</div>')+'<div class="guia-txt"><b>'+p.n+'</b><p>💧 '+p.r+' · ☀️ '+p.l+'</p></div></div>';});
+$('guias').innerHTML=h;
+GUIAS.forEach((p,i)=>fotoGuia(p.w,'wg_'+i));}
+async function fotoGuia(w,key){if(LS.get(key,''))return;try{const r=await fetch('https://es.wikipedia.org/api/rest_v1/page/summary/'+encodeURIComponent(w));if(!r.ok)return;const d=await r.json();const url=d.thumbnail&&d.thumbnail.source;if(!url)return;LS.set(key,url);const el=document.querySelector('[data-key="'+key+'"]');if(el){const img=new Image();img.className='guia-img';img.setAttribute('data-key',key);img.src=url;el.replaceWith(img);}}catch(e){}}
 function datosEspecie(d){const e=d.especie||{};const pn=(e.plantnet&&e.plantnet[0])?e.plantnet[0]:null;const lo=(e.local&&e.local[0])?e.local[0]:null;
 let nom=e.nombre_comun||(pn?pn.nombre_comun:'');let cient=e.nombre_cientifico||(pn?pn.nombre_cientifico:'');
 if(!nom&&lo)nom=lo.clase;if(!nom||nom.toLowerCase()==='no identificada')nom='Planta';
@@ -205,4 +229,7 @@ const cuid=d.cuidados||{};$('textoLuz').textContent=cuid.luz||'Luz brillante sin
 $('btnInforme').textContent=tier()==='pro'?'📄 Informe detallado (incluido en Pro)':'📄 Informe detallado (0,50 €)';
 cambiarTab('cuidados',document.querySelector('.tab'))}
 
-show('jardin');actualizarTier();
+let splashTimer=null,splashSeg=5;
+function iniciarSplash(){splashSeg=5;const el=$('splashSkip');if(el)el.textContent='Saltar en '+splashSeg+' s';clearInterval(splashTimer);splashTimer=setInterval(()=>{splashSeg--;if(splashSeg<=0){saltarSplash('jardin');}else if(el){el.textContent='Saltar en '+splashSeg+' s';}},1000);}
+function saltarSplash(dest){clearInterval(splashTimer);const sp=$('splash');if(sp)sp.classList.add('off');if(dest==='scan'){abrirCamara();}else{show('jardin');}}
+show('jardin');actualizarTier();iniciarSplash();

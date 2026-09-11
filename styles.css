@@ -177,3 +177,19 @@ h1,.result-title,.vacio h2,.pw h2{font-family:'Fraunces',serif;letter-spacing:-.
 .freq-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;border-radius:50%;background:var(--verde);cursor:pointer;box-shadow:0 2px 8px rgba(47,122,77,.3);border:3px solid #fff}
 .freq-slider::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--verde);cursor:pointer;box-shadow:0 2px 8px rgba(47,122,77,.3);border:3px solid #fff}
 .freq-info{font-size:13px;color:var(--gris);margin:0}
+.splash{position:fixed;inset:0;z-index:90;background:var(--fondo);display:flex;align-items:center;justify-content:center;text-align:center;padding:28px;animation:fade .4s ease}
+.splash.off{display:none}
+.splash-logo{width:88px;height:88px;border-radius:26px;margin:0 auto 18px}
+.splash-logo svg{width:48px;height:48px}
+.splash-title{font-family:'Fraunces',serif;font-size:40px;font-weight:800;color:var(--tinta)}
+.splash-title span{color:var(--verde)}
+.splash-sub{color:var(--gris);font-size:15px;margin:8px 0 30px}
+.splash-actions{display:flex;flex-direction:column;gap:12px;max-width:320px;margin:0 auto}
+.btn-borde{background:#fff;color:var(--verde);border:1.5px solid var(--verde)}
+.splash-skip{margin-top:26px;background:none;border:none;color:var(--gris);font-size:14px;cursor:pointer;text-decoration:underline}
+.guia-grupo{font-family:'Fraunces',serif;font-size:20px;color:var(--tinta);margin:18px 0 10px}
+.guia-card{display:flex;gap:12px;align-items:center;background:#fff;border-radius:18px;padding:10px;margin-bottom:10px;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+.guia-img{width:64px;height:64px;border-radius:14px;object-fit:cover;flex-shrink:0}
+.guia-ph{background:var(--fondo);display:flex;align-items:center;justify-content:center;font-size:28px}
+.guia-txt b{font-size:16px;color:var(--tinta)}
+.guia-txt p{font-size:13px;color:var(--gris);margin:2px 0 0}
