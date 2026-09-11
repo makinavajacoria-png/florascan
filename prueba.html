@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>FloraScan — prueba</title></head>
+<body style="font-family:sans-serif;max-width:700px;margin:2rem auto">
+<h1>🌿 FloraScan — prueba del backend</h1>
+<input type="file" id="foto" accept="image/*">
+<button onclick="analizar()">Analizar</button>
+<pre id="out" style="background:#f4f4f4;padding:1rem;white-space:pre-wrap"></pre>
+<script>
+async function analizar(){
+  const f = document.getElementById('foto').files[0];
+  if(!f){ alert('Elige una foto'); return; }
+  const fd = new FormData(); fd.append('imagen', f);
+  const out = document.getElementById('out');
+  out.textContent = 'Analizando... (puede tardar 10-15 s con Pl@ntNet)';
+  try {
+    const r = await fetch('http://localhost:8000/analizar', {method:'POST', body:fd});
+    if (!r.ok) {
+      out.textContent = '❌ Error HTTP ' + r.status + '\n' + (await r.text());
+      return;
+    }
+    out.textContent = JSON.stringify(await r.json(), null, 2);
+  } catch(e) {
+    out.textContent = '❌ No se pudo conectar con el backend.\n' +
+                      '¿Está corriendo "python -m uvicorn main:app --reload"?\nDetalle: ' + e;
+  }
+}
+</script>
+</body>
+</html>

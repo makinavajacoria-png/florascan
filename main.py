@@ -1080,6 +1080,10 @@ def interfaz():
 def estilos():
     return FileResponse(BASE / "styles.css", media_type="text/css")
 
+@app.get("/logo.png")
+def logo():
+    return FileResponse(BASE / "logo.png", media_type="image/png")
+
 @app.get("/app.js")
 def script():
     return FileResponse(BASE / "app.js", media_type="text/javascript")

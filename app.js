@@ -19,7 +19,16 @@ else if(p==='mensual'){$('pwCta').textContent='Continuar →';$('pwLinea').textC
 else{$('pwCta').textContent='Comprar de por vida →';$('pwLinea').textContent='Pago único de 35,99 €. Acceso Pro para siempre, sin renovaciones.';}}
 function activarPro(){LS.set('tier','pro');LS.set('plan',planElegido);if(planElegido==='lifetime'){LS.set('lifetime',true);LS.set('trialFin',0);}else{LS.set('lifetime',false);LS.set('trialFin',Date.now()+7*864e5);}actualizarTier();cerrarPaywall();alert(planElegido==='lifetime'?'✅ Acceso Pro de por vida activado (simulación).':(planElegido==='mensual'?'✅ Pro mensual activado (simulación).':'✅ Prueba Pro de 7 días activada (simulación).'));show('jardin')}
 function restaurar(){alert(tier()==='free'?'No hay compras anteriores.':'✅ Membresía restaurada: '+tier())}
-function limpiarCache(){if(confirm('¿Borrar datos?')){Object.keys(localStorage).filter(k=>k.startsWith('fs_')).forEach(k=>localStorage.removeItem(k));location.reload()}}
+function limpiarCache(){if(confirm('¿Borrar la caché de fotos de la guía?')){Object.keys(localStorage).filter(k=>k.startsWith('fs_wg_')).forEach(k=>localStorage.removeItem(k));location.reload();}}
+function borrarTodo(){if(confirm('¿Eliminar TODOS tus datos (jardín, suscripción y ajustes)? Esta acción no se puede deshacer.')){Object.keys(localStorage).filter(k=>k.startsWith('fs_')).forEach(k=>localStorage.removeItem(k));location.reload();}}
+function limpiarInterno(o){if(Array.isArray(o)){o.forEach(limpiarInterno);return o}if(o&&typeof o==='object'){['modelo','fuente','plantnet','local'].forEach(k=>delete o[k]);Object.values(o).forEach(limpiarInterno)}return o}
+function exportarJardin(){const p=LS.get('plantas',[]);if(!p.length){alert('Tu jardín está vacío todavía.');return}
+const copia=limpiarInterno(JSON.parse(JSON.stringify(p)));
+const b=new Blob([JSON.stringify(copia,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='florascan_jardin.json';document.body.appendChild(a);a.click();document.body.removeChild(a);}
+function abrirLegal(t){$('legalTitulo').textContent=t==='priv'?'Política de privacidad':'Términos de uso';$('legalTexto').innerHTML=t==='priv'?LEGAL_PRIV:LEGAL_TERMS;$('modalLegal').classList.add('on');}
+function cerrarLegal(){$('modalLegal').classList.remove('on');}
+const LEGAL_PRIV='<p>FloraScan procesa las fotos que subes únicamente para identificar la especie y generar el diagnóstico. Las imágenes se envían a los servicios de identificación (Google Gemini, OpenRouter y Pl@ntNet) solo durante el análisis y no se almacenan en nuestros servidores.</p><p>Tu jardín, recordatorios y ajustes se guardan localmente en tu dispositivo. Puedes exportarlos o eliminarlos definitivamente desde Ajustes en cualquier momento (derechos RGPD).</p><p>No compartimos datos personales con terceros ni los usamos con fines publicitarios.</p>';
+const LEGAL_TERMS='<p>FloraScan ofrece información orientativa sobre identificación y cuidados de plantas. No sustituye el asesoramiento de un profesional de la jardinería o la fitosanidad.</p><p>Las suscripciones Pro se gestionan a través de Google Play y se renuevan automáticamente hasta que las canceles con al menos 24 horas de antelación.</p><p>El uso de la app implica la aceptación de estas condiciones y de la política de privacidad.</p>';
 function consumirEscaneo(){if(tier()!=='free')return true;const hoy=new Date().toDateString();const u=LS.get('usado_'+hoy,0);if(u>=3){abrirPaywall();return false}LS.set('usado_'+hoy,u+1);return true}
 
 async function abrirCamara(){$('cam').classList.add('on');try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});video.srcObject=stream;await video.play();try{zoomTrack=stream.getVideoTracks()[0];if(zoomTrack.getCapabilities().zoom)$('zoom').max=zoomTrack.getCapabilities().zoom}catch(e){}}catch(e){alert('Error cámara: '+e);cerrarCamara()}}
@@ -231,5 +240,7 @@ cambiarTab('cuidados',document.querySelector('.tab'))}
 
 let splashTimer=null,splashSeg=5;
 function iniciarSplash(){splashSeg=5;const el=$('splashSkip');if(el)el.textContent='Saltar en '+splashSeg+' s';clearInterval(splashTimer);splashTimer=setInterval(()=>{splashSeg--;if(splashSeg<=0){saltarSplash('jardin');}else if(el){el.textContent='Saltar en '+splashSeg+' s';}},1000);}
+const tg=$('tgAvisos');if(tg)tg.checked=LS.get('avisosRiego',true);
+const ts=$('tgSonido');if(ts)ts.checked=LS.get('sonidoScan',false);
 function saltarSplash(dest){clearInterval(splashTimer);const sp=$('splash');if(sp)sp.classList.add('off');if(dest==='scan'){abrirCamara();}else{show('jardin');}}
 show('jardin');actualizarTier();iniciarSplash();
