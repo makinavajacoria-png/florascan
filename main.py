@@ -444,27 +444,40 @@ def normalizar_estado(estado):
 MODO_PRUEBA_QWEN = False   # ⚠️ Ponla en False cuando termines de probar
 
 
-PROMPT_DIAGNOSTICO = """Eres un experto en jardinería y fitopatología.
-Analiza la imagen y responde SOLO en JSON válido.{contexto}
+PROMPT_DIAGNOSTICO = """Actúa como fitopatólogo experto pero escribe como un divulgador: lenguaje cotidiano que entienda cualquier persona sin conocimientos de jardinería
+- Evita palabras técnicas; si una es imprescindible, explícala entre paréntesis con palabras simples (ejemplo: "sustrato (la tierra de la maceta)", "acaricida (producto contra las arañas rojas)", "necrosis (tejido muerto y seco)")
+- Frases cortas, claras y cercanas, como se lo explicarías a un amigo: di qué hacer, con qué y cada cuánto.{contexto}
 
 Devuelve exactamente:
 {{
   "especie": "nombre común o 'no identificada'",
   "estado": "saludable" | "atencion" | "critico",
   "confianza": 0.0,
+  "patogeno": "plaga o patógeno detectado o null",
   "sintomas": ["máximo 3 síntomas visibles"],
   "diagnostico": "qué le pasa en 1 frase",
   "tratamiento": ["máximo 3 pasos concretos"],
   "prevencion": ["1 medida preventiva"],
   "luz": "necesidad de luz de la especie en 3-6 palabras",
-  "riego": "frecuencia de riego de la especie en 3-8 palabras"
+  "riego": "frecuencia de riego de la especie en 3-8 palabras",
+  "guia": {{
+    "diagnostico_detallado": "párrafo de 3-4 frases: qué le pasa, causa probable, gravedad",
+    "aislamiento": "instrucciones de aislamiento respecto a otras plantas",
+    "pasos": ["5 a 7 pasos concretos y accionables para curar la planta, en orden"],
+    "productos": ["productos o remedios caseros con dosis y frecuencia de aplicación"],
+    "riego": "cómo ajustar el riego durante la recuperación",
+    "luz_sustrato": "ajustes de luz, sustrato y abonado durante la recuperación",
+    "plazo": "semanas estimadas de recuperación y señales de mejoría a vigilar",
+    "prevencion": "cómo evitar que el problema reaparezca"
+  }}
 }}
 
 Reglas:
-- Si NO ves síntomas: estado="saludable", sintomas=[], tratamiento=[]
-- Si ves manchas, amarilleo, polvo blanco o necrosis: NO digas saludable
+- Si NO ves síntomas: estado="saludable", sintomas=[], tratamiento=[], guia limitada a rutina de cuidados y prevención en 3 líneas
+- Si ves manchas, amarilleo, polvo blanco o necrosis: NO digas saludable, desarrolla la guía completa de recuperación
 - Usa "posible / compatible con" si no hay certeza
 - "luz" y "riego" SIEMPRE rellenos según la especie identificada
+- Actúa como fitopatólogo y jardinero experto: la guía debe ser un plan de recuperación real, paso a paso, en español, con cantidades, frecuencias y productos concretos
 - Español, conciso, sin markdown"""
 
 
@@ -483,9 +496,11 @@ def construir_resultado(resultado, especie_contexto, modelo_nombre):
     return {
         "especie": resultado.get("especie") or especie_contexto or "no identificada",
         "estado": estado, "confianza": confianza,
+        "patogeno": resultado.get("patogeno") or "",
         "sintomas": sintomas,
         "diagnostico": resultado.get("diagnostico") or "",
         "tratamiento": tratamiento, "prevencion": prevencion,
+        "guia": resultado.get("guia") or {},
         "modelo": modelo_nombre,
     }
 
@@ -499,9 +514,11 @@ def texto_libre_como_respaldo(texto, especie_contexto, modelo_nombre):
     return {
         "especie": especie_contexto or "no identificada",
         "estado": "atencion", "confianza": 0.5,
+        "patogeno": "",
         "sintomas": [],
         "diagnostico": texto,
         "tratamiento": [], "prevencion": [],
+        "guia": {},
         "modelo": modelo_nombre,
     }
 
@@ -868,15 +885,16 @@ async def analizar(imagen: UploadFile = File(...)):
             recomendaciones = ["Mantén los cuidados habituales y revisa periódicamente hojas y envés."]
 
         salud = {
-            "puntuacion": puntuacion, "estado": estado,
-            "sintomas": ia.get("sintomas") or [],
-            "recomendaciones": recomendaciones,
-            "diagnostico": ia.get("diagnostico") or "",
-            "fuente": fuente_ia,
-            "confianza": round(confianza, 2),
-            "modelo": ia.get("modelo"),
-        }
-
+             "puntuacion": puntuacion, "estado": estado,
+             "sintomas": ia.get("sintomas") or [],
+    "recomendaciones": recomendaciones,
+    "diagnostico": ia.get("diagnostico") or "",
+    "patogeno": ia.get("patogeno") or "",
+    "guia": ia.get("guia") or {},
+    "fuente": fuente_ia,
+    "confianza": round(confianza, 2),
+    "modelo": ia.get("modelo"),
+      }
         return {
             "especie": {
                 "fuente": fuente_ia,

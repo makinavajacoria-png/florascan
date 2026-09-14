@@ -90,7 +90,6 @@ bloqueoActivo=(tier()==='free'&&LS.get('usado_'+hoy,0)>3);
     const r=await fetch('/analizar',{method:'POST',body:fd});
     if(!r.ok)throw new Error('Servidor '+r.status);
     const d=await r.json();
-    guardarJardin(blob,d);
     pintar(d);
   }catch(e){
     $('resFotoWrap').classList.remove('scanning');
@@ -220,6 +219,9 @@ function verDetalle(id){
   const p=LS.get('plantas',[]).find(x=>x.id===id);
   bloqueoActivo=(tier()==='free'&&!!(p&&p.locked));
   if(p){volverA='jardin';idPlantaActual=id;$('resFoto').src=p.img;fetch(p.img).then(r=>r.blob()).then(b=>ultimoBlob=b);pintar(p.data);show('resultado')}
+  modoJardin='view';
+const b2=$('btnAddJardin');
+if(b2)b2.textContent='🌿 Ver en Mi Jardín';
 }
 
 async function pedirInforme(){if(!ultimoBlob){alert('Primero escanea una planta.');return}if(tier()!=='pro'){if(!confirm('Informe detallado: 0,50 € (simulación). ¿Continuar?'))return}$('estado').textContent='Generando informe...';const fd=new FormData();fd.append('imagen',ultimoBlob,'foto.jpg');try{const r=await fetch('/informe',{method:'POST',body:fd});if(!r.ok)throw new Error('Error '+r.status);const d=await r.json();const a=document.createElement('a');a.href=d.url;a.download='informe_florascan.pdf';document.body.appendChild(a);a.click();document.body.removeChild(a);$('estado').textContent='✅ Informe descargado'}catch(e){alert('Error informe: '+e.message)}}
@@ -297,6 +299,9 @@ function pintar(d){
   const plantas=LS.get('plantas',[]);
   const ultima=plantas.find(p=>p.data===d)||(plantas[0]&&plantas[0].data.especie.nombre_comun===datosEspecie(d).nom?plantas[0]:null);
   if(ultima)idPlantaActual=ultima.id;
+  modoJardin='add';
+const b=$('btnAddJardin');
+if(b)b.textContent='[+] Añadir a "Mi Jardín"';
   
   const s=d.salud||{},e=datosEspecie(d),cu=d.cuidados||{};
   
@@ -320,8 +325,22 @@ function pintar(d){
   $('resDiagnostico').style.display=s.diagnostico?'flex':'none';
   
   // Recomendaciones
-  const recs=s.recomendaciones||[];
-  $('resRecomendaciones').innerHTML=recs.length?recs.map(r=>`<p style="margin:8px 0;color:#424242">• ${r}</p>`).join(''):'<p style="color:#757575">Mantén los cuidados habituales.</p>';
+  $('resRecomendaciones').innerHTML=pintarGuia(s);
+  function pintarGuia(s){
+  const g=s.guia||{};const recs=s.recomendaciones||[];
+  let h='';
+  if(g.diagnostico_detallado)h+='<p class="gt-parrafo"><b>🔍 Diagnóstico detallado:</b> '+g.diagnostico_detallado+'</p>';
+  if(g.aislamiento)h+='<div class="gt-bloque aviso"><b>🚨 Aislamiento inmediato</b><p>'+g.aislamiento+'</p></div>';
+  if(g.pasos&&g.pasos.length){h+='<h4 class="gt-h">🛠️ Plan de acción paso a paso</h4><ol class="gt-pasos">'+g.pasos.map(p=>'<li>'+p+'</li>').join('')+'</ol>';}
+  if(g.productos&&g.productos.length){h+='<h4 class="gt-h">💊 Productos y remedios</h4><ul class="gt-lista">'+g.productos.map(p=>'<li>'+p+'</li>').join('')+'</ul>';}
+  if(g.riego)h+='<div class="gt-bloque"><b>💧 Riego durante la recuperación</b><p>'+g.riego+'</p></div>';
+  if(g.luz_sustrato)h+='<div class="gt-bloque"><b>☀️ Luz, sustrato y abonado</b><p>'+g.luz_sustrato+'</p></div>';
+  if(g.plazo)h+='<div class="gt-bloque ok"><b>⏳ Recuperación esperada</b><p>'+g.plazo+'</p></div>';
+  if(g.prevencion)h+='<div class="gt-bloque"><b>🛡️ Prevención futura</b><p>'+g.prevencion+'</p></div>';
+  if(!h&&recs.length)h='<ul class="gt-lista">'+recs.map(r=>'<li>'+r+'</li>').join('')+'</ul>';
+  if(!h)h='<p class="gt-parrafo">Mantén los cuidados habituales de la especie y vigila su evolución los próximos 7 días.</p>';
+  return h;
+}
   
   // Verificar si debe bloquear
   verificarBloqueo();
@@ -380,3 +399,12 @@ cerrarPaywall();if(typeof actualizarTier==='function')actualizarTier();}
 function abrirPaywall(){const b=$('pwRescate');if(b)b.style.display='none';selPlan('anual');$('paywall').classList.add('on');}
 function cerrarPaywall(){$('paywall').classList.remove('on');}
 function abrirPaywallRescate(){planElegido='rescate';abrirPaywall();const b=$('pwRescate');if(b)b.style.display='flex';}
+let modoJardin='add';
+function accionJardin(){
+  if(modoJardin==='view'){show('jardin');pintarJardin();return;}
+  if(!datosActuales||!ultimoBlob){alert('Nada que guardar todavía.');return;}
+  guardarJardin(ultimoBlob,datosActuales);
+  modoJardin='view';
+  const b=$('btnAddJardin');
+  if(b)b.textContent='✅ Guardada · Toca para ver tu jardín';
+}

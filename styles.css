@@ -268,6 +268,23 @@ h1,.result-title,.vacio h2,.pw h2{font-family:'Fraunces',serif;letter-spacing:-.
 .pw-cta small{font-size:12px;font-weight:600;opacity:.85}
 .pw-links{display:flex;justify-content:center;gap:18px;margin-top:18px}
 .pw-links a{font-size:12px;color:#6B7280;text-decoration:underline;cursor:pointer}
+/* === GUÍA DE TRATAMIENTO === */
+.gt-parrafo{font-size:14px;color:#374151;line-height:1.6;margin:14px 0}
+.gt-h{font-size:15px;font-weight:700;color:#1B5E20;margin:22px 0 10px;padding-top:14px;border-top:1px solid #E5E7EB}
+.res-recomendaciones .gt-h:first-child{border-top:none;padding-top:0;margin-top:6px}
+.gt-pasos{margin:0;padding:0;list-style:none;counter-reset:paso}
+.gt-pasos li{counter-increment:paso;position:relative;padding:10px 10px 10px 42px;margin-bottom:10px;background:#F0F7F1;border-radius:12px;font-size:14px;color:#374151;line-height:1.55}
+.gt-pasos li::before{content:counter(paso);position:absolute;left:10px;top:10px;width:22px;height:22px;border-radius:50%;background:#1B7A43;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.gt-lista{margin:0;padding:0 0 0 4px;list-style:none}
+.gt-lista li{font-size:14px;color:#374151;margin:8px 0;padding-left:18px;position:relative;line-height:1.55}
+.gt-lista li::before{content:'•';position:absolute;left:2px;color:#1B7A43;font-weight:700}
+.gt-bloque{background:#F7F5EF;border-left:4px solid #1B7A43;border-radius:12px;padding:14px 16px;margin:18px 0}
+.gt-bloque b{font-size:14px;color:#1B5E20;display:block;margin-bottom:6px}
+.gt-bloque p{font-size:14px;color:#374151;margin:0;line-height:1.6}
+.gt-bloque.aviso{background:#E8F2FD;border-left-color:#3B82F6}
+.gt-bloque.aviso b{color:#1D4ED8;font-weight:800}
+.gt-bloque.aviso p{color:#1E3A8A;font-weight:700}
+.gt-bloque.ok{background:#ECFDF5;border-left-color:#10B981}
 
 /* Estados de salud */
 .res-alerta.saludable .icon{color:#4CAF50}
