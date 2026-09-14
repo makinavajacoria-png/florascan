@@ -4,28 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>FloraScan</title>
-<link rel="stylesheet" href="/styles.css?v=26">
+<link rel="stylesheet" href="/styles.css?v=53">
 </head>
 <body>
 <div class="app">
 <div class="splash" id="splash">
-  <div class="splash-inner">
-    <img class="brand-img" src="/logo.png" alt="FloraScan">
-    <p class="splash-sub">Identifica plantas y cuida de ellas como un experto</p>
-    <div class="splash-actions">
-      <button class="btn btn-verde" onclick="saltarSplash('scan')">📷 Escanear una planta</button>
-      <button class="btn btn-borde" onclick="saltarSplash('jardin')">🌿 Ir a mi jardín</button>
-    </div>
-    <button class="splash-skip" id="splashSkip" onclick="saltarSplash('jardin')">Saltar en 5 s</button>
+  <div class="sp-ring-wrap">
+    <svg class="sp-ring" viewBox="0 0 200 200">
+      <circle class="sp-ring-bg" cx="100" cy="100" r="86"/>
+      <circle class="sp-ring-fg" id="spRing" cx="100" cy="100" r="86"/>
+    </svg>
+    <img src="/logo.png?v=3" alt="FloraScan" class="sp-logo">
+    <div class="sp-num" id="spNum">5</div>
   </div>
+  <p class="sp-tag">Identifica plantas y cuida de ellas como un experto</p>
+  <div class="sp-actions">
+    <button class="btn btn-verde" onclick="saltarSplash('scan')">📷 Escanear una planta</button>
+    <button class="btn btn-borde" onclick="saltarSplash('jardin')">🌿 Ir a mi jardín</button>
+  </div>
+  <button class="sp-skip" onclick="saltarSplash('jardin')">Saltar</button>
 </div>
 
 <!-- MI JARDÍN -->
 <section class="sc grad" id="s-jardin">
   <div class="brand">
-  <span class="brand-logo"><svg viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M12 17c0-5 3.5-8.5 8-8.5 0 5-3.5 8.5-8 8.5z"/><path d="M12 17c0-3-2-5-5-5 0 3 2 5 5 5z"/></svg></span>
-  <div><h1>Mi Jardín</h1><p class="sub">Tu cuaderno botánico personal</p></div>
-</div>
+    <div><h1>Mi Jardín</h1><p class="sub">Tu cuaderno botánico personal</p></div>
+  </div>
   <div class="vacio" id="jardinVacio">
     <div class="emoji">🪴</div>
     <h2>Empecemos</h2>
@@ -45,7 +49,6 @@
 <!-- RESULTADO DETALLADO -->
 <div class="sc" id="s-resultado">
   <div class="res-header">
-    <button class="btn-back" onclick="volver()">‹ Volver</button>
     <button class="btn-share" onclick="compartirResultado()">Compartir ↗</button>
   </div>
   
@@ -90,7 +93,7 @@
 
 <!-- AJUSTES -->
 <div class="sc" id="s-ajustes">
-  <div class="ajustes-hdr"><span class="brand-logo"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg></span><div><h1>Ajustes</h1><p>Tu cuenta y preferencias</p></div></div>
+  <div class="brand"><div><h1>Ajustes</h1></div></div>
 
   <div class="card-section"><h3>Suscripción</h3><div class="info-card">
     <div class="info-item"><div class="icon">👑</div><div class="content"><div class="title" id="estadoTier">Suscripción Estado: Gratis</div><div class="desc">3 escaneos diarios incluidos en el plan gratuito</div></div></div>
@@ -214,7 +217,7 @@
   <button id="n-ajustes" onclick="show('ajustes')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>Ajustes</button>
 </nav>
 
-<script src="/app.js?v=26"></script>
+<script src="/app.js?v=53"></script>
 <div class="legal-modal" id="modalLegal">
   <div class="legal-box">
     <h2 id="legalTitulo"></h2>

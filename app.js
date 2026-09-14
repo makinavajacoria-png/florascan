@@ -1,3 +1,4 @@
+let spTimer=null,spIntentos=0;
 const LS={get(k,d){try{const v=JSON.parse(localStorage.getItem('fs_'+k));return v==null?d:v}catch(e){return d}},set(k,v){localStorage.setItem('fs_'+k,JSON.stringify(v))}};
 let stream=null,volverA='jardin',zoomTrack=null,ultimoBlob=null,tabActual='cuidados',datosActuales=null,planElegido='anual';
 let idPlantaActual = null
@@ -380,11 +381,10 @@ function volver(){
 }
 
 let splashTimer=null,splashSeg=5;
-function iniciarSplash(){splashSeg=5;const el=$('splashSkip');if(el)el.textContent='Saltar en '+splashSeg+' s';clearInterval(splashTimer);splashTimer=setInterval(()=>{splashSeg--;if(splashSeg<=0){saltarSplash('jardin');}else if(el){el.textContent='Saltar en '+splashSeg+' s';}},1000);}
 const tg=$('tgAvisos');if(tg)tg.checked=LS.get('avisosRiego',true);
 const ts=$('tgSonido');if(ts)ts.checked=LS.get('sonidoScan',false);
 function saltarSplash(dest){clearInterval(splashTimer);const sp=$('splash');if(sp)sp.classList.add('off');if(dest==='scan'){abrirCamara();}else{show('jardin');}}
-show('jardin');actualizarTier();iniciarSplash();
+show('jardin');actualizarTier();iniciarCuenta();
 function selPlan(p){planElegido=p;
 const cards=document.querySelectorAll('.pw-card');
 const map={anual:0,mensual:1,lifetime:2};
@@ -408,3 +408,24 @@ function accionJardin(){
   const b=$('btnAddJardin');
   if(b)b.textContent='✅ Guardada · Toca para ver tu jardín';
 }
+
+function iniciarCuenta(){
+  const num=$('spNum'),ring=$('spRing');
+  if(!num||!ring){
+    if(spIntentos++>20){console.error('El splash nuevo no existe en el HTML');return;}
+    setTimeout(iniciarCuenta,300);return;
+  }
+  const C=540.4;let t=5;
+  num.textContent=t;ring.style.strokeDashoffset=C;
+  clearInterval(spTimer);
+  spTimer=setInterval(()=>{
+    const s=$('splash');
+    if(!s||s.style.display==='none'||s.classList.contains('off')){clearInterval(spTimer);spTimer=null;return;}
+    t--;
+    if(t<=0){clearInterval(spTimer);spTimer=null;saltarSplash('jardin');return;}
+    num.textContent=t;
+    ring.style.strokeDashoffset=C*(1-(5-t)/5);
+  },1000);
+}
+const _saltarOrig=saltarSplash;
+saltarSplash=function(d){if(spTimer){clearInterval(spTimer);spTimer=null;}_saltarOrig(d);};
