@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>FloraScan</title>
-<link rel="stylesheet" href="/styles.css?v=19">
+<link rel="stylesheet" href="/styles.css?v=26">
 </head>
 <body>
 <div class="app">
@@ -43,37 +43,50 @@
 </section>
 
 <!-- RESULTADO DETALLADO -->
-<section class="sc" id="s-resultado">
-  <div class="result-header">
-    <button class="back-btn" onclick="show(volverA)">←</button>
-    <img id="preview" class="result-img" alt="">
+<div class="sc" id="s-resultado">
+  <div class="res-header">
+    <button class="btn-back" onclick="volver()">‹ Volver</button>
+    <button class="btn-share" onclick="compartirResultado()">Compartir ↗</button>
   </div>
-  <p id="estado"></p>
-  <div class="result-content">
-    <span class="ficha-chip">Ficha botánica</span>
-<h1 id="nombre" class="result-title"></h1>
-    <p id="subtitulo" class="result-subtitle"></p>
-    <div class="info-rows">
-      <div class="info-row"><span class="label">Nombre común:</span><span class="value" id="nombreComun"></span></div>
-      <div class="info-row"><span class="label">Nombre botánico:</span><span class="value" id="nombreBotanico"></span></div>
+  
+  <div class="res-content">
+    <div class="res-foto-wrap" id="resFotoWrap">
+  <img id="resFoto" class="res-foto" src="" alt="">
+  <div class="scan-line"></div>
+  <div class="scan-text">Analizando imagen...</div>
+</div>
+    
+    <div class="res-info">
+      <h1 id="resNombre" class="res-nombre"></h1>
+      <p id="resComun" class="res-comun"></p>
     </div>
-    <div class="badges">
-      <div class="badge"><span class="badge-icon">☀️</span><span id="textoLuz">-</span></div>
-      <div class="badge"><span class="badge-icon">💧</span><span id="textoRiego">-</span></div>
+    
+    <div class="res-card res-salud">
+      <h3>ESTADO DE SALUD</h3>
+      <div id="resAlerta" class="res-alerta"></div>
+      <div id="resPatogeno" class="res-detalle"></div>
+      <div id="resDiagnostico" class="res-detalle"></div>
     </div>
-    <button class="btn btn-informe" id="btnInforme" onclick="pedirInforme()">📄 Informe detallado (0,50 €)</button>
-    <div class="tabs-sticky">
-      <div class="tabs">
-        <button class="tab active" onclick="cambiarTab('cuidados',this)">Cuidados</button>
-        <button class="tab" onclick="cambiarTab('lugar',this)">Lugar</button>
-        <button class="tab" onclick="cambiarTab('caracteristicas',this)">Características</button>
-        <button class="tab" onclick="cambiarTab('plagas',this)">Plagas</button>
-      </div>
+    
+    <div class="res-card res-tratamiento" id="resTratamiento">
+  <h3>GUÍA DE TRATAMIENTO Y RECUPERACIÓN:</h3>
+  <div style="position:relative">
+    <div id="resRecomendaciones" class="res-recomendaciones"></div>
+    
+    <div class="res-lock" id="resLock">
+      <div class="lock-icon">🔒</div>
+      <button class="btn-unlock" onclick="abrirPaywallRescate()">
+        DESBLOQUEAR PLAN DE RESCATE<br>
+        <span>(0,99 € o con Pro)</span>
+      </button>
+      <button class="btn-ver-plan" onclick="abrirPaywall()">[ Ver Plan ]</button>
     </div>
-    <div class="tab-content" id="tabContent"></div>
   </div>
-  <button class="fab" onclick="abrirCamara()">+ Añadir planta</button>
-</section>
+</div>
+    
+    <button class="btn-add-jardin" onclick="guardarJardin()">[+] Añadir a "Mi Jardín"</button>
+  </div>
+</div>
 
 <!-- AJUSTES -->
 <div class="sc" id="s-ajustes">
@@ -140,43 +153,55 @@
 
 <!-- PAYWALL -->
 <div class="pw" id="paywall">
-  <div class="pw-top"><button onclick="restaurar()">Restablecer</button><button onclick="cerrarPaywall()">✕</button></div>
-  <div class="pw-hero">
-    <img class="brand-img pw-img" src="/logo.png" alt="FloraScan">
-  </div>
-  <div class="pw-body">
-    <ul class="pw-beneficios">
-      <li><span class="check">✓</span><span>Identificación de <b>miles de especies</b> con una sola foto</span></li>
-      <li><span class="check">✓</span><span>Diagnóstico de <b>enfermedades y plagas</b> al instante</span></li>
-      <li><span class="check">✓</span><span>Jardín, recordatorios e informes <b>sin límites</b></span></li>
-    </ul>
-    <div class="pw-planes">
-  <div class="plan" id="planMensual" onclick="elegirPlan('mensual')">
-    <b>1 mes</b>
-    <span class="plan-precio">1,99 €</span>
-    <span class="plan-check">✓</span>
-  </div>
-  <div class="plan sel" id="planAnual" onclick="elegirPlan('anual')">
-    <span class="plan-tag">MÁS POPULAR</span>
-    <b>7 días gratis</b>
-    <span class="plan-precio">Luego 18,99 €/año</span>
-    <span class="plan-check">✓</span>
-  </div>
-  <div class="plan" id="planLifetime" onclick="elegirPlan('lifetime')">
-    <b>De por vida</b>
-    <span class="plan-precio">35,99 € único</span>
-    <span class="plan-check">✓</span>
-  </div>
-</div>
-    <label class="pw-switch">
-      <span>Avísame antes de que finalice la prueba gratuita</span>
-      <input type="checkbox" id="avisoTrial" checked>
-      <i></i>
-    </label>
-    <button class="pw-cta" id="pwCta" onclick="activarPro()">Prueba Gratis →</button>
-    <p class="pw-linea" id="pwLinea">7 días gratis. Luego, 18,99 €/año (~1,25 €/mes)</p>
-    <p class="aviso">Tu suscripción se cargará automáticamente en tu cuenta de Google Play. Para evitar el cargo, cancela al menos 24 horas antes de que finalice el periodo desde tu cuenta de Google Play.</p>
-    <div class="legal"><a href="#">Política de privacidad</a> | <a href="#">Condiciones de uso</a> | <a href="#">Términos de la suscripción</a></div>
+  <div class="pw-scroll">
+    <button class="pw-close" onclick="cerrarPaywall()">✕</button>
+    <svg class="pw-art" viewBox="0 0 200 200" fill="none" stroke="#2F7A4D" stroke-width="2">
+      <path d="M100 190c0-60 30-100 80-110-5 55-35 95-80 110z" opacity=".5"/>
+      <path d="M100 190c0-40-20-70-55-80 5 40 25 68 55 80z" opacity=".35"/>
+      <path d="M120 60c10-18 28-30 48-32M60 120c-12-10-20-24-22-40" stroke="#C9A227" opacity=".6"/>
+    </svg>
+    <h1 class="pw-title">FloraScan<br>Premium</h1>
+
+    <div class="pw-rescate" id="pwRescate" style="display:none">
+      <b>🔒 Plan de rescate</b>
+      <span>Desbloquea el tratamiento de esta planta por solo <b>0,99 €</b> (pago único).</span>
+      <button class="pw-rescate-btn" onclick="comprarAhora('rescate')">Desbloquear ahora →</button>
+    </div>
+
+    <div class="pw-card sel" id="pwAnual" onclick="selPlan('anual')">
+      <span class="pw-tag">MEJOR VALOR</span>
+      <div class="pw-card-top"><b>PLAN ANUAL</b><span class="pw-toggle"><i></i></span></div>
+      <div class="pw-price">18,99 € <span>/ año (1,58 €/mes)</span></div>
+      <ul>
+        <li>Diagnósticos ilimitados</li>
+        <li>Sin publicidad</li>
+        <li>Guías de cuidado premium</li>
+        <li>Soporte de expertos en plantas</li>
+      </ul>
+    </div>
+
+    <div class="pw-card" id="pwMensual" onclick="selPlan('mensual')">
+      <div class="pw-card-top"><b>PLAN MENSUAL</b></div>
+      <div class="pw-price">1,99 € <span>/ mes</span></div>
+      <ul class="pw-inline"><li>Diagnósticos ilimitados</li><li>Sin publicidad</li></ul>
+    </div>
+
+    <div class="pw-card" id="pwVida" onclick="selPlan('lifetime')">
+      <div class="pw-card-top"><b>ACCESO DE POR VIDA</b></div>
+      <div class="pw-price">35,99 € <span>(pago único)</span></div>
+      <ul class="pw-inline"><li>Todas las futuras actualizaciones</li><li>Todas las funciones Premium</li></ul>
+    </div>
+
+    <button class="pw-cta" onclick="comprarAhora()">
+      <span id="pwCta">COMENZAR PRUEBA GRATIS Y SUSCRIBIRSE</span>
+      <small id="pwLinea">Prueba gratuita de 7 días</small>
+    </button>
+
+    <div class="pw-links">
+      <a onclick="restaurar()">Restaurar compras</a>
+      <a onclick="abrirLegal('priv')">Política de privacidad</a>
+      <a onclick="abrirLegal('terms')">Términos de servicio</a>
+    </div>
   </div>
 </div>
 
@@ -189,7 +214,7 @@
   <button id="n-ajustes" onclick="show('ajustes')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>Ajustes</button>
 </nav>
 
-<script src="/app.js?v=19"></script>
+<script src="/app.js?v=26"></script>
 <div class="legal-modal" id="modalLegal">
   <div class="legal-box">
     <h2 id="legalTitulo"></h2>

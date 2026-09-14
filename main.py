@@ -1084,6 +1084,10 @@ def estilos():
 def logo():
     return FileResponse(BASE / "logo.png", media_type="image/png")
 
+@app.get("/fondo-paywall.png")
+def fondo_paywall():
+    return FileResponse(BASE / "fondo-paywall.png", media_type="image/png")
+
 @app.get("/app.js")
 def script():
     return FileResponse(BASE / "app.js", media_type="text/javascript")

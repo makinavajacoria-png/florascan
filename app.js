@@ -13,10 +13,28 @@ function tier(){return LS.get('tier','free')}
 function actualizarTier(){$('estadoTier').textContent='Suscripción Estado: '+(tier()==='free'?'Gratis':(tier()==='pro'?'Pro (prueba)':'De por vida'))}
 function abrirPaywall(){$('paywall').classList.add('on')}
 function cerrarPaywall(){$('paywall').classList.remove('on')}
-function elegirPlan(p){planElegido=p;const a=$('planAnual'),m=$('planMensual'),l=$('planLifetime');if(a)a.classList.toggle('sel',p==='anual');if(m)m.classList.toggle('sel',p==='mensual');if(l)l.classList.toggle('sel',p==='lifetime');
-if(p==='anual'){$('pwCta').textContent='Prueba Gratis →';$('pwLinea').textContent='7 días gratis. Luego, 18,99 €/año (~1,58 €/mes)';}
-else if(p==='mensual'){$('pwCta').textContent='Continuar →';$('pwLinea').textContent='1 mes por 1,99 €. Renovación mensual, cancela cuando quieras.';}
-else{$('pwCta').textContent='Comprar de por vida →';$('pwLinea').textContent='Pago único de 35,99 €. Acceso Pro para siempre, sin renovaciones.';}}
+function elegirPlan(p){
+  planElegido=p;
+  const a=$('planAnual'),m=$('planMensual'),l=$('planLifetime'),r=$('planRescate');
+  if(a)a.classList.toggle('sel',p==='anual');
+  if(m)m.classList.toggle('sel',p==='mensual');
+  if(l)l.classList.toggle('sel',p==='lifetime');
+  if(r)r.classList.toggle('sel',p==='rescate');
+  
+  if(p==='rescate'){
+    $('pwCta').textContent='Desbloquear por 0,99 € →';
+    $('pwLinea').textContent='Un diagnóstico completo para salvar tu planta ahora mismo.';
+  }else if(p==='anual'){
+    $('pwCta').textContent='Prueba Gratis →';
+    $('pwLinea').textContent='7 días gratis. Luego, 18,99 €/año (~1,58 €/mes)';
+  }else if(p==='mensual'){
+    $('pwCta').textContent='Continuar →';
+    $('pwLinea').textContent='1 mes por 1,99 €. Renovación mensual, cancela cuando quieras.';
+  }else{
+    $('pwCta').textContent='Comprar de por vida →';
+    $('pwLinea').textContent='Pago único de 35,99 €. Acceso Pro para siempre, sin renovaciones.';
+  }
+}
 function activarPro(){LS.set('tier','pro');LS.set('plan',planElegido);if(planElegido==='lifetime'){LS.set('lifetime',true);LS.set('trialFin',0);}else{LS.set('lifetime',false);LS.set('trialFin',Date.now()+7*864e5);}actualizarTier();cerrarPaywall();alert(planElegido==='lifetime'?'✅ Acceso Pro de por vida activado (simulación).':(planElegido==='mensual'?'✅ Pro mensual activado (simulación).':'✅ Prueba Pro de 7 días activada (simulación).'));show('jardin')}
 function restaurar(){alert(tier()==='free'?'No hay compras anteriores.':'✅ Membresía restaurada: '+tier())}
 function limpiarCache(){if(confirm('¿Borrar la caché de fotos de la guía?')){Object.keys(localStorage).filter(k=>k.startsWith('fs_wg_')).forEach(k=>localStorage.removeItem(k));location.reload();}}
@@ -29,7 +47,13 @@ function abrirLegal(t){$('legalTitulo').textContent=t==='priv'?'Política de pri
 function cerrarLegal(){$('modalLegal').classList.remove('on');}
 const LEGAL_PRIV='<p>FloraScan procesa las fotos que subes únicamente para identificar la especie y generar el diagnóstico. Las imágenes se envían a los servicios de identificación (Google Gemini, OpenRouter y Pl@ntNet) solo durante el análisis y no se almacenan en nuestros servidores.</p><p>Tu jardín, recordatorios y ajustes se guardan localmente en tu dispositivo. Puedes exportarlos o eliminarlos definitivamente desde Ajustes en cualquier momento (derechos RGPD).</p><p>No compartimos datos personales con terceros ni los usamos con fines publicitarios.</p>';
 const LEGAL_TERMS='<p>FloraScan ofrece información orientativa sobre identificación y cuidados de plantas. No sustituye el asesoramiento de un profesional de la jardinería o la fitosanidad.</p><p>Las suscripciones Pro se gestionan a través de Google Play y se renuevan automáticamente hasta que las canceles con al menos 24 horas de antelación.</p><p>El uso de la app implica la aceptación de estas condiciones y de la política de privacidad.</p>';
-function consumirEscaneo(){if(tier()!=='free')return true;const hoy=new Date().toDateString();const u=LS.get('usado_'+hoy,0);if(u>=3){abrirPaywall();return false}LS.set('usado_'+hoy,u+1);return true}
+function consumirEscaneo(){
+  if(tier()!=='free')return true;
+  const hoy=new Date().toDateString();
+  const u=LS.get('usado_'+hoy,0);
+  LS.set('usado_'+hoy,u+1);
+  return true; // Siempre permite analizar, el bloqueo se hace en verificarBloqueo()
+}
 
 async function abrirCamara(){$('cam').classList.add('on');try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});video.srcObject=stream;await video.play();try{zoomTrack=stream.getVideoTracks()[0];if(zoomTrack.getCapabilities().zoom)$('zoom').max=zoomTrack.getCapabilities().zoom}catch(e){}}catch(e){alert('Error cámara: '+e);cerrarCamara()}}
 function cerrarCamara(){if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;$('cam').classList.remove('on')}
@@ -41,9 +65,43 @@ function cerrarConsejos(){$('modalConsejos').classList.remove('on')}
 
 async function prepararBlob(b){try{const bmp=await createImageBitmap(b);const m=1600,e=Math.min(1,m/Math.max(bmp.width,bmp.height));const c=document.createElement('canvas');c.width=Math.round(bmp.width*e);c.height=Math.round(bmp.height*e);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);return await new Promise(r=>c.toBlob(r,'image/jpeg',0.92))}catch(e){return b}}
 
-async function analizar(blobO){if(!consumirEscaneo())return;const blob=await prepararBlob(blobO);ultimoBlob=blob;show('resultado');$('preview').src=URL.createObjectURL(blob);$('estado').textContent='Analizando imagen';document.querySelector('.result-header').classList.add('scanning');const fd=new FormData();fd.append('imagen',blob,'foto.jpg');try{const r=await fetch('/analizar',{method:'POST',body:fd});if(!r.ok)throw new Error('Servidor '+r.status);const d=await r.json();guardarJardin(blob,d);pintar(d)}catch(e){$('estado').textContent='❌ Error: '+e.message;document.querySelector('.result-header').classList.remove('scanning')}}
+async function analizar(blobO){
+  if(!consumirEscaneo())return;
+  const hoy=new Date().toDateString();
+bloqueoActivo=(tier()==='free'&&LS.get('usado_'+hoy,0)>3);
+  const blob=await prepararBlob(blobO);
+  ultimoBlob=blob;
+  
+  // Mostrar pantalla de resultado con estado de carga
+  show('resultado');
+  $('resFoto').src=URL.createObjectURL(blob);
+  $('resFotoWrap').classList.add('scanning');
+  $('resNombre').textContent='Analizando...';
+  $('resComun').textContent='';
+  $('resAlerta').innerHTML='<span class="icon">⏳</span>Procesando imagen';
+  $('resPatogeno').style.display='none';
+  $('resDiagnostico').style.display='none';
+  $('resRecomendaciones').innerHTML='<p style="color:#757575">Espera un momento...</p>';
+  
+  const fd=new FormData();
+  fd.append('imagen',blob,'foto.jpg');
+  
+  try{
+    const r=await fetch('/analizar',{method:'POST',body:fd});
+    if(!r.ok)throw new Error('Servidor '+r.status);
+    const d=await r.json();
+    guardarJardin(blob,d);
+    pintar(d);
+  }catch(e){
+    $('resFotoWrap').classList.remove('scanning');
+    $('resNombre').textContent='❌ Error';
+    $('resComun').textContent=e.message;
+    $('resAlerta').innerHTML='<span class="icon">❌</span>Error al analizar';
+    $('resRecomendaciones').innerHTML='<p style="color:#F44336">No se pudo completar el análisis. Intenta de nuevo.</p>';
+  }
+}
 
-function guardarJardin(blob,d){const r=new FileReader();r.onload=()=>{const p=LS.get('plantas',[]);p.unshift({id:Date.now(),img:r.result,data:d,fecha:Date.now()});if(p.length>30)p.length=30;LS.set('plantas',p)};r.readAsDataURL(blob)}
+function guardarJardin(blob,d){const r=new FileReader();r.onload=()=>{const p=LS.get('plantas',[]);p.unshift({id:Date.now(),img:r.result,data:d,fecha:Date.now(),locked:bloqueoActivo});if(p.length>30)p.length=30;LS.set('plantas',p)};r.readAsDataURL(blob)}
 
 function pintarJardin(){
   const p = LS.get('plantas', []);
@@ -158,7 +216,11 @@ function setFrecuencia(dias) {
     // No redibujamos toda la pestaña, solo actualizamos el valor en el jardín si volvemos
   }
 }
-function verDetalle(id){const p=LS.get('plantas',[]).find(x=>x.id===id);if(p){volverA='jardin';idPlantaActual = id;$('preview').src=p.img;fetch(p.img).then(r=>r.blob()).then(b=>ultimoBlob=b);pintar(p.data);show('resultado')}}
+function verDetalle(id){
+  const p=LS.get('plantas',[]).find(x=>x.id===id);
+  bloqueoActivo=(tier()==='free'&&!!(p&&p.locked));
+  if(p){volverA='jardin';idPlantaActual=id;$('resFoto').src=p.img;fetch(p.img).then(r=>r.blob()).then(b=>ultimoBlob=b);pintar(p.data);show('resultado')}
+}
 
 async function pedirInforme(){if(!ultimoBlob){alert('Primero escanea una planta.');return}if(tier()!=='pro'){if(!confirm('Informe detallado: 0,50 € (simulación). ¿Continuar?'))return}$('estado').textContent='Generando informe...';const fd=new FormData();fd.append('imagen',ultimoBlob,'foto.jpg');try{const r=await fetch('/informe',{method:'POST',body:fd});if(!r.ok)throw new Error('Error '+r.status);const d=await r.json();const a=document.createElement('a');a.href=d.url;a.download='informe_florascan.pdf';document.body.appendChild(a);a.click();document.body.removeChild(a);$('estado').textContent='✅ Informe descargado'}catch(e){alert('Error informe: '+e.message)}}
 
@@ -229,14 +291,74 @@ function renderTabContent(d){
   c.innerHTML=h;
 }
 
-function pintar(d){datosActuales=d;const plantas=LS.get('plantas',[]);const ultima=plantas.find(p=>p.data===d)||(plantas[0]&&plantas[0].data.especie.nombre_comun===datosEspecie(d).nom?plantas[0]:null);if(ultima)idPlantaActual=ultima.id;document.querySelector('.result-header').classList.remove('scanning');const e=datosEspecie(d);$('estado').textContent='';
-const chip=$('chipFuente');if(chip)chip.textContent='Ficha botánica · fuente: '+(d.salud.fuente||'local')+(d.salud.modelo?' ('+d.salud.modelo+')':'');
-$('nombre').textContent=e.nom;
-$('subtitulo').textContent=e.cient?'especie de '+(e.genero||'plantas')+' ('+e.cient.split(' ')[0]+')':'Especie pendiente de confirmación';
-$('nombreComun').textContent=e.nom;$('nombreBotanico').textContent=e.cient||'-';
-const cuid=d.cuidados||{};$('textoLuz').textContent=cuid.luz||'Luz brillante sin sol directo';$('textoRiego').textContent=cuid.riego||'Moderado: riega al secarse la capa superior';
-$('btnInforme').textContent=tier()==='pro'?'📄 Informe detallado (incluido en Pro)':'📄 Informe detallado (0,50 €)';
-cambiarTab('cuidados',document.querySelector('.tab'))}
+function pintar(d){
+  $('resFotoWrap').classList.remove('scanning');
+  datosActuales=d;
+  const plantas=LS.get('plantas',[]);
+  const ultima=plantas.find(p=>p.data===d)||(plantas[0]&&plantas[0].data.especie.nombre_comun===datosEspecie(d).nom?plantas[0]:null);
+  if(ultima)idPlantaActual=ultima.id;
+  
+  const s=d.salud||{},e=datosEspecie(d),cu=d.cuidados||{};
+  
+  // La foto ya está puesta en analizar(), no la tocamos
+  
+  // Nombres
+  $('resNombre').textContent=e.nom||'Planta desconocida';
+  $('resComun').textContent=e.cient||'';
+  
+  // Estado de salud
+  const estado=s.estado||'saludable';
+  const iconoEstado=estado==='saludable'?'✅':(estado==='atencion'?'⚠️':'❌');
+  const textoEstado=estado==='saludable'?'Saludable':(estado==='atencion'?'Alerta Moderada':'Alerta Crítica');
+  $('resAlerta').innerHTML=`<span class="icon">${iconoEstado}</span>${textoEstado}`;
+  $('resAlerta').className='res-alerta '+estado;
+  
+  // Patógeno y diagnóstico
+  $('resPatogeno').innerHTML=s.patogeno?`<span class="icon">🦠</span><strong>Patógeno:</strong> ${s.patogeno}`:'';
+  $('resPatogeno').style.display=s.patogeno?'flex':'none';
+  $('resDiagnostico').innerHTML=s.diagnostico?`<span class="icon">❓</span><strong>Diagnóstico:</strong> ${s.diagnostico}`:'';
+  $('resDiagnostico').style.display=s.diagnostico?'flex':'none';
+  
+  // Recomendaciones
+  const recs=s.recomendaciones||[];
+  $('resRecomendaciones').innerHTML=recs.length?recs.map(r=>`<p style="margin:8px 0;color:#424242">• ${r}</p>`).join(''):'<p style="color:#757575">Mantén los cuidados habituales.</p>';
+  
+  // Verificar si debe bloquear
+  verificarBloqueo();
+}
+
+let bloqueoActivo=false;
+
+function verificarBloqueo(){
+  const lock=$('resLock');
+  const recs=$('resRecomendaciones');
+  if(bloqueoActivo){
+    lock.classList.add('active');
+    recs.classList.add('locked');
+  }else{
+    lock.classList.remove('active');
+    recs.classList.remove('locked');
+  }
+}
+
+function abrirPaywallRescate(){
+  planElegido='rescate';
+  abrirPaywall();
+}
+
+function compartirResultado(){
+  const nombre=$('resNombre').textContent;
+  const texto=`Acabo de identificar ${nombre} con FloraScan 🌿`;
+  if(navigator.share){
+    navigator.share({title:'FloraScan',text:texto}).catch(()=>{});
+  }else{
+    alert('Compartir no disponible en este navegador');
+  }
+}
+
+function volver(){
+  show('jardin');
+}
 
 let splashTimer=null,splashSeg=5;
 function iniciarSplash(){splashSeg=5;const el=$('splashSkip');if(el)el.textContent='Saltar en '+splashSeg+' s';clearInterval(splashTimer);splashTimer=setInterval(()=>{splashSeg--;if(splashSeg<=0){saltarSplash('jardin');}else if(el){el.textContent='Saltar en '+splashSeg+' s';}},1000);}
@@ -244,3 +366,17 @@ const tg=$('tgAvisos');if(tg)tg.checked=LS.get('avisosRiego',true);
 const ts=$('tgSonido');if(ts)ts.checked=LS.get('sonidoScan',false);
 function saltarSplash(dest){clearInterval(splashTimer);const sp=$('splash');if(sp)sp.classList.add('off');if(dest==='scan'){abrirCamara();}else{show('jardin');}}
 show('jardin');actualizarTier();iniciarSplash();
+function selPlan(p){planElegido=p;
+const cards=document.querySelectorAll('.pw-card');
+const map={anual:0,mensual:1,lifetime:2};
+cards.forEach((c,i)=>c.classList.toggle('sel',i===map[p]));
+const c=$('pwCta'),l=$('pwLinea');if(!c||!l)return;
+if(p==='anual'){c.textContent='COMENZAR PRUEBA GRATIS Y SUSCRIBIRSE';l.textContent='Prueba gratuita de 7 días';}
+else if(p==='mensual'){c.textContent='CONTINUAR CON PLAN MENSUAL';l.textContent='1,99 € al mes · cancela cuando quieras';}
+else if(p==='lifetime'){c.textContent='COMPRAR ACCESO DE POR VIDA';l.textContent='Pago único de 35,99 € · sin renovaciones';}}
+function comprarAhora(p){const plan=p||planElegido||'anual';
+if(typeof activarPro==='function'){activarPro(plan);}else{LS.set('tier',plan==='lifetime'?'lifetime':'pro');}
+cerrarPaywall();if(typeof actualizarTier==='function')actualizarTier();}
+function abrirPaywall(){const b=$('pwRescate');if(b)b.style.display='none';selPlan('anual');$('paywall').classList.add('on');}
+function cerrarPaywall(){$('paywall').classList.remove('on');}
+function abrirPaywallRescate(){planElegido='rescate';abrirPaywall();const b=$('pwRescate');if(b)b.style.display='flex';}
