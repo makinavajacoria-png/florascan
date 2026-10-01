@@ -813,6 +813,9 @@ def score_desde_estado(estado, confianza=0.7):
 # ============================================================
 # ENDPOINTS
 # ============================================================
+import asyncio
+from fastapi import File, UploadFile
+from fastapi.responses import JSONResponse
 
 @app.post("/analizar")
 async def analizar(imagen: UploadFile = File(...)):
@@ -825,26 +828,83 @@ async def analizar(imagen: UploadFile = File(...)):
     except Exception:
         raise HTTPException(status_code=400, detail="No se pudo leer la imagen.")
 
-    img_bytes_jpeg = imagen_a_jpeg_bytes(img, max_px=1024)  # ← BAJAR de 1280 a 1024
+    img_bytes_jpeg = imagen_a_jpeg_bytes(img, max_px=1024)
+    loop = asyncio.get_running_loop()
 
-    # ⚡ PARALELIZAR: lanzar Pl@ntNet + identificación local + diagnóstico al mismo tiempo
-    import asyncio
+    # -------------------------------------------------------------
+    # 1. PLAN A: Consultar directamente a Gemini (hasta 10s)
+    # -------------------------------------------------------------
+    ia_gemini = None
+    try:
+        print("Plan A: Consultando a Gemini...")
+        ia_gemini = await asyncio.wait_for(
+            loop.run_in_executor(EXECUTOR, diagnostico_gemini, img, None),
+            timeout=10.0
+        )
+    except asyncio.TimeoutError:
+        print("⏱️ Gemini superó el tiempo límite (10s). Pasando al Plan B...")
+    except Exception as e:
+        print(f"⚠️ Error consultando Gemini: {e}. Pasando al Plan B...")
 
-    loop = asyncio.get_event_loop()
+    if ia_gemini and not MODO_PRUEBA_QWEN:
+        fuente_ia = "gemini"
+        ia = ia_gemini
+        # Para la especie, lanzamos una identificación rápida si es posible o usamos lo de la IA
+        local = identificar_local(img)
+        especie_contexto = ia.get("especie")
+        cuidados = {
+            "grupo": "Planta",
+            "riego": ia.get("riego") or "Según necesidad",
+            "luz": ia.get("luz") or "Luz indirecta",
+            "tipico": "Observar respuesta y ajustar"
+        }
+        
+        estado = normalizar_estado(ia.get("estado"))
+        confianza = float(ia.get("confianza", 0.7))
+        puntuacion = score_desde_estado(estado, confianza)
+        recomendaciones = list(ia.get("tratamiento") or [])
+        prevencion = ia.get("prevencion") or []
+        if prevencion:
+            recomendaciones.append("Prevención: " + " ".join(prevencion))
+        if not recomendaciones and estado == "saludable":
+            recomendaciones = ["Mantén los cuidados habituales y revisa periódicamente hojas y envés."]
 
-    # Usamos el EXECUTOR global definido al principio del archivo
-    task_plantnet = loop.run_in_executor(EXECUTOR, identificar_plantnet, img_bytes_jpeg)
-    task_local = loop.run_in_executor(EXECUTOR, identificar_local, img)
-    task_gemini = loop.run_in_executor(EXECUTOR, diagnostico_gemini, img, None)
-    
-    # Esperar resultados
-    plantnet, local, ia_gemini = await asyncio.gather(task_plantnet, task_local, task_gemini, return_exceptions=True)
-    
-    # Si alguna falló, convertir a None
-    plantnet = plantnet if not isinstance(plantnet, Exception) else []
-    local = local if not isinstance(local, Exception) else []
-    ia_gemini = ia_gemini if not isinstance(ia_gemini, Exception) else None
-    
+        salud = {
+            "puntuacion": puntuacion, "estado": estado,
+            "sintomas": ia.get("sintomas") or [],
+            "recomendaciones": recomendaciones,
+            "diagnostico": ia.get("diagnostico") or "",
+            "patogeno": ia.get("patogeno") or "",
+            "guia": ia.get("guia") or {},
+            "fuente": fuente_ia,
+            "confianza": round(confianza, 2),
+            "modelo": ia.get("modelo"),
+        }
+        return {
+            "especie": {
+                "fuente": fuente_ia,
+                "plantnet": [], "local": local,
+                "nombre_comun": ia.get("especie") or especie_contexto or "No identificada",
+            },
+            "salud": salud,
+            "cuidados": cuidados,
+            "aviso": "Diagnóstico asistido por IA. Es orientativo; en casos graves consulta a un experto o vivero.",
+        }
+
+    # -------------------------------------------------------------
+    # 2. PLAN B: Si Gemini falla, usar Pl@ntNet + Qwen / Modelo local
+    # -------------------------------------------------------------
+    print("Plan B: Identificando especie con Pl@ntNet y local...")
+    try:
+        task_plantnet = loop.run_in_executor(EXECUTOR, identificar_plantnet, img_bytes_jpeg)
+        task_local = loop.run_in_executor(EXECUTOR, identificar_local, img)
+        plantnet, local = await asyncio.gather(task_plantnet, task_local, return_exceptions=True)
+        plantnet = plantnet if not isinstance(plantnet, Exception) else []
+        local = local if not isinstance(local, Exception) else []
+    except Exception as e:
+        print(f"Error en identificación Plan B: {e}")
+        plantnet, local = [], []
+
     fuente_usada, textos_perfil = elegir_especie(plantnet, local)
     cultivo = detectar_cultivo(plantnet, local)
     perfil = perfil_de(textos_perfil)
@@ -861,17 +921,18 @@ async def analizar(imagen: UploadFile = File(...)):
         cuidados = {"grupo": perfil["grupo"], "riego": perfil["riego"],
                     "luz": perfil["luz"], "tipico": perfil["tipico"]}
 
-    # Si Gemini ya respondió, usarlo
-    if ia_gemini and not MODO_PRUEBA_QWEN:
-        fuente_ia = "gemini"
-        ia = ia_gemini
-    else:
-        # Probar Qwen como respaldo
-        ia = diagnostico_qwen(img, especie_contexto=especie_contexto)
-        fuente_ia = "qwen" if ia else None
+    # Intentar Qwen como respaldo de la IA si Gemini falló
+    ia = None
+    try:
+        ia = await asyncio.wait_for(
+            loop.run_in_executor(EXECUTOR, diagnostico_qwen, img, especie_contexto),
+            timeout=10.0
+        )
+    except Exception as e:
+        print(f"Qwen de respaldo falló o no está configurado: {e}")
 
     if ia:
-        # Si no hay cuidados del diccionario, usar los de la IA
+        fuente_ia = "qwen"
         if not cuidados and ia.get("luz") and ia.get("riego"):
             cuidados = {
                 "grupo": "Planta",
@@ -891,16 +952,16 @@ async def analizar(imagen: UploadFile = File(...)):
             recomendaciones = ["Mantén los cuidados habituales y revisa periódicamente hojas y envés."]
 
         salud = {
-             "puntuacion": puntuacion, "estado": estado,
-             "sintomas": ia.get("sintomas") or [],
-    "recomendaciones": recomendaciones,
-    "diagnostico": ia.get("diagnostico") or "",
-    "patogeno": ia.get("patogeno") or "",
-    "guia": ia.get("guia") or {},
-    "fuente": fuente_ia,
-    "confianza": round(confianza, 2),
-    "modelo": ia.get("modelo"),
-      }
+            "puntuacion": puntuacion, "estado": estado,
+            "sintomas": ia.get("sintomas") or [],
+            "recomendaciones": recomendaciones,
+            "diagnostico": ia.get("diagnostico") or "",
+            "patogeno": ia.get("patogeno") or "",
+            "guia": ia.get("guia") or {},
+            "fuente": fuente_ia,
+            "confianza": round(confianza, 2),
+            "modelo": ia.get("modelo"),
+        }
         return {
             "especie": {
                 "fuente": fuente_ia,
@@ -909,10 +970,13 @@ async def analizar(imagen: UploadFile = File(...)):
             },
             "salud": salud,
             "cuidados": cuidados,
-            "aviso": "Diagnóstico asistido por IA. Es orientativo; en casos graves consulta a un experto o vivero.",
+            "aviso": "Diagnóstico asistido por IA (Qwen). Es orientativo.",
         }
 
-    # Fallback local
+    # -------------------------------------------------------------
+    # 3. PLAN C: Fallback local completo de emergencia
+    # -------------------------------------------------------------
+    print("Plan C: Usando modelo local de emergencia...")
     salud = analizar_salud_local(img, cultivo=cultivo, perfil=perfil)
     return {
         "especie": {"fuente": fuente_usada, "plantnet": plantnet, "local": local},
