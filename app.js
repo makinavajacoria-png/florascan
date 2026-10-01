@@ -116,7 +116,7 @@ function pintarJardin(){
 
   $('jardin').innerHTML = p.map(x => {
     const s = x.data.salud;
-    const colorEstado = s.estado === 'saludable' ? '#2F7A4D' : (s.estado === 'atencion' ? '#D97706' : '#DC2626');
+    const colorEstado = s.estado === 'saludable' ? '#22c55e' : (s.estado === 'atencion' ? '#f59e0b' : '#ef4444');
     const nom = x.data.especie.nombre_comun || 'Planta';
     
     // Lógica de Riego
@@ -125,25 +125,32 @@ function pintarJardin(){
     const diffDias = Math.ceil((rec.proxima - hoy) / 86400000);
     
     let textoRiego = `💧 ${diffDias}d`;
-    let colorRiego = '#9CA3AF'; // Gris
+    let colorRiego = '#374151'; // Gris oscuro para texto sobre cristal
     
     if (diffDias <= 0) {
       textoRiego = diffDias === 0 ? '💧 ¡Hoy!' : '💧 Atrasado';
-      colorRiego = '#DC2626'; // Rojo si urge
+      colorRiego = '#dc2626'; // Rojo si urge
     } else if (diffDias === 1) {
       textoRiego = '💧 Mañana';
-      colorRiego = '#D97706'; // Naranja aviso
+      colorRiego = '#d97706'; // Naranja aviso
     }
 
     return `
       <div class="planta" onclick="verDetalle(${x.id})">
         <button class="borrar" onclick="event.stopPropagation();eliminarPlanta(${x.id})">✕</button>
-        <img src="${x.img}">
-        <div class="txt">
-          <span class="punto" style="background:${colorEstado}"></span>${nom}
-          <div style="font-size:11px;color:${colorRiego};font-weight:600;margin-top:4px;display:flex;justify-content:space-between;align-items:center">
-            ${textoRiego}
-            <button class="btn-mini-regar" onclick="event.stopPropagation();regarPlanta(${x.id})" style="background:${colorRiego};color:#fff;border:none;border-radius:10px;padding:2px 6px;font-size:10px;cursor:pointer">Regar</button>
+        
+        <!-- Badge de riego flotante (Glassmorphism) -->
+        <button class="badge-riego-glass" onclick="event.stopPropagation();regarPlanta(${x.id})" style="color:${colorRiego}">
+          ${textoRiego}
+        </button>
+
+        <img src="${x.img}" alt="${nom}">
+        
+        <!-- Gradiente semitransparente con texto encima -->
+        <div class="txt-gradiente">
+          <div class="planta-nombre">
+            <span class="punto" style="background:${colorEstado}"></span>
+            <span class="nombre-texto">${nom}</span>
           </div>
         </div>
       </div>`;
