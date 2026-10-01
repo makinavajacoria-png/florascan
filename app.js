@@ -1,3 +1,81 @@
+// ==========================================
+// GESTOR INDEXEDDB (Para evitar QuotaExceededError)
+// ==========================================
+const DB = {
+  dbName: 'FloraScanDB',
+  dbVersion: 1,
+  storeName: 'fotos',
+
+  async open() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, this.dbVersion);
+      request.onerror = () => reject('Error abriendo IndexedDB');
+      request.onsuccess = () => resolve(request.result);
+      request.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          db.createObjectStore(this.storeName);
+        }
+      };
+    });
+  },
+
+  async guardarFoto(id, base64) {
+    try {
+      const db = await this.open();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(this.storeName, 'readwrite');
+        const store = tx.objectStore(this.storeName);
+        const req = store.put(base64, id.toString());
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject('Error guardando foto en DB');
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  },
+
+  async obtenerFoto(id) {
+    try {
+      const db = await this.open();
+      return new Promise((resolve) => {
+        const tx = db.transaction(this.storeName, 'readonly');
+        const store = tx.objectStore(this.storeName);
+        const req = store.get(id.toString());
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      });
+    } catch (e) {
+      return null;
+    }
+  },
+
+  async eliminarFoto(id) {
+    try {
+      const db = await this.open();
+      return new Promise((resolve) => {
+        const tx = db.transaction(this.storeName, 'readwrite');
+        const store = tx.objectStore(this.storeName);
+        const req = store.delete(id.toString());
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+      });
+    } catch (e) {}
+  },
+
+  async borrarTodo() {
+    try {
+      const db = await this.open();
+      return new Promise((resolve) => {
+        const tx = db.transaction(this.storeName, 'readwrite');
+        const store = tx.objectStore(this.storeName);
+        const req = store.clear();
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+      });
+    } catch (e) {}
+  }
+};
 let spTimer=null,spIntentos=0;
 const LS={get(k,d){try{const v=JSON.parse(localStorage.getItem('fs_'+k));return v==null?d:v}catch(e){return d}},set(k,v){localStorage.setItem('fs_'+k,JSON.stringify(v))}};
 let stream=null,volverA='jardin',zoomTrack=null,ultimoBlob=null,tabActual='cuidados',datosActuales=null,planElegido='anual';
@@ -5,10 +83,41 @@ let idPlantaActual = null
 const video=document.getElementById('video');
 const $=id=>document.getElementById(id);
 
-function show(n){document.querySelectorAll('.sc').forEach(s=>s.classList.remove('on'));$('s-'+n).classList.add('on');
-[['n-jardin','jardin'],['n-guia','guia'],['n-ajustes','ajustes']].forEach(p=>{const b=$(p[0]);if(b)b.classList.toggle('sel',p[1]===n)});
-document.querySelector('nav').style.display=(n==='resultado')?'none':'flex';
-if(n==='jardin')pintarJardin();if(n==='guia')pintarGuias();window.scrollTo(0,0)}
+// Variable para evitar bucles entre eventos del historial
+let navegandoHistorial = false;
+
+// Modificamos show() para integrar history.pushState
+function show(n, guardarHistorial = true) {
+  document.querySelectorAll('.sc').forEach(s => s.classList.remove('on'));
+  const seccion = $('s-' + n);
+  if (seccion) seccion.classList.add('on');
+
+  // Actualizar estado activo en el menú de navegación
+  [['n-jardin','jardin'], ['n-guia','guia'], ['n-ajustes','ajustes']].forEach(p => {
+    const b = $(p[0]);
+    if (b) b.classList.toggle('sel', p[1] === n);
+  });
+
+  // Mostrar o ocultar la barra inferior según la sección
+  const navBar = document.querySelector('nav');
+  if (navBar) {
+    navBar.style.display = (n === 'resultado') ? 'none' : 'flex';
+  }
+
+  // Refrescar contenido según la vista
+  if (n === 'jardin') pintarJardin();
+  if (n === 'guia') pintarGuias();
+  window.scrollTo(0, 0);
+
+  // Integración con el historial del navegador/Android
+  if (guardarHistorial && !navegandoHistorial) {
+    const estadoActual = history.state;
+    // Solo añadimos entrada al historial si cambiamos a una pantalla distinta
+    if (!estadoActual || estadoActual.seccion !== n) {
+      history.pushState({ seccion: n }, '', '#' + n);
+    }
+  }
+}
 
 function tier(){return LS.get('tier','free')}
 function actualizarTier(){$('estadoTier').textContent='Suscripción Estado: '+(tier()==='free'?'Gratis':(tier()==='pro'?'Pro (prueba)':'De por vida'))}
@@ -39,7 +148,14 @@ function elegirPlan(p){
 function activarPro(){LS.set('tier','pro');LS.set('plan',planElegido);if(planElegido==='lifetime'){LS.set('lifetime',true);LS.set('trialFin',0);}else{LS.set('lifetime',false);LS.set('trialFin',Date.now()+7*864e5);}actualizarTier();cerrarPaywall();alert(planElegido==='lifetime'?'✅ Acceso Pro de por vida activado (simulación).':(planElegido==='mensual'?'✅ Pro mensual activado (simulación).':'✅ Prueba Pro de 7 días activada (simulación).'));show('jardin')}
 function restaurar(){alert(tier()==='free'?'No hay compras anteriores.':'✅ Membresía restaurada: '+tier())}
 function limpiarCache(){if(confirm('¿Borrar la caché de fotos de la guía?')){Object.keys(localStorage).filter(k=>k.startsWith('fs_wg_')).forEach(k=>localStorage.removeItem(k));location.reload();}}
-function borrarTodo(){if(confirm('¿Eliminar TODOS tus datos (jardín, suscripción y ajustes)? Esta acción no se puede deshacer.')){Object.keys(localStorage).filter(k=>k.startsWith('fs_')).forEach(k=>localStorage.removeItem(k));location.reload();}}
+// BORRAR TODO (Ajustes)
+async function borrarTodo() {
+  if (confirm('¿Eliminar TODOS tus datos (jardín, suscripción y ajustes)? Esta acción no se puede deshacer.')) {
+    Object.keys(localStorage).filter(k => k.startsWith('fs_')).forEach(k => localStorage.removeItem(k));
+    await DB.borrarTodo(); // Limpiar la base de datos de fotos completa
+    location.reload();
+  }
+}
 function limpiarInterno(o){if(Array.isArray(o)){o.forEach(limpiarInterno);return o}if(o&&typeof o==='object'){['modelo','fuente','plantnet','local'].forEach(k=>delete o[k]);Object.values(o).forEach(limpiarInterno)}return o}
 function exportarJardin(){const p=LS.get('plantas',[]);if(!p.length){alert('Tu jardín está vacío todavía.');return}
 const copia=limpiarInterno(JSON.parse(JSON.stringify(p)));
@@ -64,7 +180,31 @@ async function subir(ev){const f=ev.target.files[0];if(f){cerrarCamara();await a
 function abrirConsejos(){$('modalConsejos').classList.add('on')}
 function cerrarConsejos(){$('modalConsejos').classList.remove('on')}
 
-async function prepararBlob(b){try{const bmp=await createImageBitmap(b);const m=1600,e=Math.min(1,m/Math.max(bmp.width,bmp.height));const c=document.createElement('canvas');c.width=Math.round(bmp.width*e);c.height=Math.round(bmp.height*e);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);return await new Promise(r=>c.toBlob(r,'image/jpeg',0.92))}catch(e){return b}}
+// PASO 1: COMPRESIÓN AGRESIVA DE IMAGEN EN EL MÓVIL
+async function prepararBlob(b) {
+  try {
+    const bmp = await createImageBitmap(b);
+    // Reducimos la dimensión máxima a 1024px (suficiente para que la IA e identifique la planta)
+    const maxPx = 1024;
+    const escala = Math.min(1, maxPx / Math.max(bmp.width, bmp.height));
+    
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width * escala);
+    c.height = Math.round(bmp.height * escala);
+    
+    const ctx = c.getContext('2d');
+    // Desactivamos el suavizado complejo para acelerar el procesamiento en procesadores móviles
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'medium';
+    ctx.drawImage(bmp, 0, 0, c.width, c.height);
+    
+    // Comprimimos la calidad JPEG al 75% (reduce el peso de varios MBs a ~150KB)
+    return await new Promise(r => c.toBlob(r, 'image/jpeg', 0.75));
+  } catch (e) {
+    console.warn("Fallback de compresión:", e);
+    return b;
+  }
+}
 
 async function analizar(blobO){
   if(!consumirEscaneo())return;
@@ -101,52 +241,82 @@ bloqueoActivo=(tier()==='free'&&LS.get('usado_'+hoy,0)>3);
   }
 }
 
-function guardarJardin(blob,d){const r=new FileReader();r.onload=()=>{const p=LS.get('plantas',[]);p.unshift({id:Date.now(),img:r.result,data:d,fecha:Date.now(),locked:bloqueoActivo});if(p.length>30)p.length=30;LS.set('plantas',p)};r.readAsDataURL(blob)}
+// GUARDAR PLANTA (Foto a IndexedDB, datos a localStorage)
+function guardarJardin(blob, d) {
+  const r = new FileReader();
+  r.onload = async () => {
+    const idPlanta = Date.now();
+    const base64Img = r.result;
 
-function pintarJardin(){
+    // 1. Guardar la imagen pesada en IndexedDB
+    await DB.guardarFoto(idPlanta, base64Img);
+
+    // 2. Guardar en localStorage solo los metadatos livianos
+    const p = LS.get('plantas', []);
+    p.unshift({
+      id: idPlanta,
+      data: d,
+      fecha: idPlanta,
+      locked: bloqueoActivo
+    });
+
+    if (p.length > 30) {
+      const eliminada = p.pop();
+      if (eliminada) DB.eliminarFoto(eliminada.id); // Limpiar foto sobrante
+    }
+
+    LS.set('plantas', p);
+    pintarJardin();
+  };
+  r.readAsDataURL(blob);
+}
+
+// RENDERIZAR JARDÍN (Carga asíncrona de imágenes desde IndexedDB)
+async function pintarJardin() {
   const p = LS.get('plantas', []);
-  $('jardinVacio').style.display = p.length ? 'none' : 'block';
-  
-  // Ordenar: primero las que necesitan riego urgente
+  const vacioEl = $('jardinVacio');
+  if (vacioEl) vacioEl.style.display = p.length ? 'none' : 'block';
+
   p.sort((a, b) => {
     const nextA = a.data.recordatorio?.proxima || 0;
     const nextB = b.data.recordatorio?.proxima || 0;
     return nextA - nextB;
   });
 
-  $('jardin').innerHTML = p.map(x => {
-    const s = x.data.salud;
+  const contenedor = $('jardin');
+  if (!contenedor) return;
+
+  // Generar HTML base con marcadores de posición para las imágenes
+  contenedor.innerHTML = p.map(x => {
+    const s = x.data.salud || {};
     const colorEstado = s.estado === 'saludable' ? '#22c55e' : (s.estado === 'atencion' ? '#f59e0b' : '#ef4444');
-    const nom = x.data.especie.nombre_comun || 'Planta';
-    
-    // Lógica de Riego
-    const rec = x.data.recordatorio || {frecuencia: 7, ultimaVez: Date.now() - 86400000*7, proxima: Date.now()};
+    const nom = x.data.especie?.nombre_comun || 'Planta';
+
+    const rec = x.data.recordatorio || { frecuencia: 7, ultimaVez: Date.now() - 86400000 * 7, proxima: Date.now() };
     const hoy = Date.now();
     const diffDias = Math.ceil((rec.proxima - hoy) / 86400000);
-    
+
     let textoRiego = `💧 ${diffDias}d`;
-    let colorRiego = '#374151'; // Gris oscuro para texto sobre cristal
-    
+    let colorRiego = '#374151';
+
     if (diffDias <= 0) {
       textoRiego = diffDias === 0 ? '💧 ¡Hoy!' : '💧 Atrasado';
-      colorRiego = '#dc2626'; // Rojo si urge
+      colorRiego = '#dc2626';
     } else if (diffDias === 1) {
       textoRiego = '💧 Mañana';
-      colorRiego = '#d97706'; // Naranja aviso
+      colorRiego = '#d97706';
     }
 
     return `
       <div class="planta" onclick="verDetalle(${x.id})">
         <button class="borrar" onclick="event.stopPropagation();eliminarPlanta(${x.id})">✕</button>
         
-        <!-- Badge de riego flotante (Glassmorphism) -->
         <button class="badge-riego-glass" onclick="event.stopPropagation();regarPlanta(${x.id})" style="color:${colorRiego}">
           ${textoRiego}
         </button>
 
-        <img src="${x.img}" alt="${nom}">
+        <img id="img-planta-${x.id}" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' fill='%23e5e7eb'><rect width='100%' height='100%'/></svg>" alt="${nom}">
         
-        <!-- Gradiente semitransparente con texto encima -->
         <div class="txt-gradiente">
           <div class="planta-nombre">
             <span class="punto" style="background:${colorEstado}"></span>
@@ -155,9 +325,26 @@ function pintarJardin(){
         </div>
       </div>`;
   }).join('');
+
+  // Cargar imágenes desde IndexedDB de forma progresiva
+  for (const x of p) {
+    const imgEl = $(`img-planta-${x.id}`);
+    if (imgEl) {
+      // Compatibilidad previa: si la foto aún existía en localStorage, usarla; si no, buscar en IndexedDB
+      const foto = x.img || await DB.obtenerFoto(x.id);
+      if (foto) imgEl.src = foto;
+    }
+  }
 }
 
-function eliminarPlanta(id){if(confirm('¿Eliminar planta?')){LS.set('plantas',LS.get('plantas',[]).filter(x=>x.id!==id));pintarJardin()}}
+// ELIMINAR PLANTA
+async function eliminarPlanta(id) {
+  if (confirm('¿Eliminar planta?')) {
+    LS.set('plantas', LS.get('plantas', []).filter(x => x.id !== id));
+    await DB.eliminarFoto(id); // Limpiar foto en IndexedDB
+    pintarJardin();
+  }
+}
 function regarPlanta(id) {
   const plantas = LS.get('plantas', []);
   const idx = plantas.findIndex(x => x.id === id);
@@ -223,13 +410,27 @@ function setFrecuencia(dias) {
     // No redibujamos toda la pestaña, solo actualizamos el valor en el jardín si volvemos
   }
 }
-function verDetalle(id){
-  const p=LS.get('plantas',[]).find(x=>x.id===id);
-  bloqueoActivo=(tier()==='free'&&!!(p&&p.locked));
-  if(p){volverA='jardin';idPlantaActual=id;$('resFoto').src=p.img;fetch(p.img).then(r=>r.blob()).then(b=>ultimoBlob=b);pintar(p.data);show('resultado')}
-  modoJardin='view';
-const b2=$('btnAddJardin');
-if(b2)b2.textContent='🌿 Ver en Mi Jardín';
+// VER DETALLE
+async function verDetalle(id) {
+  const p = LS.get('plantas', []).find(x => x.id === id);
+  if (p) {
+    bloqueoActivo = (tier() === 'free' && !!p.locked);
+    volverA = 'jardin';
+    idPlantaActual = id;
+
+    // Obtener la foto desde DB o fallback previo
+    const foto = p.img || await DB.obtenerFoto(id);
+    if (foto) {
+      $('resFoto').src = foto;
+      fetch(foto).then(r => r.blob()).then(b => ultimoBlob = b);
+    }
+
+    pintar(p.data);
+    show('resultado');
+  }
+  modoJardin = 'view';
+  const b2 = $('btnAddJardin');
+  if (b2) b2.textContent = '🌿 Ver en Mi Jardín';
 }
 
 async function pedirInforme(){if(!ultimoBlob){alert('Primero escanea una planta.');return}if(tier()!=='pro'){if(!confirm('Informe detallado: 0,50 € (simulación). ¿Continuar?'))return}$('estado').textContent='Generando informe...';const fd=new FormData();fd.append('imagen',ultimoBlob,'foto.jpg');try{const r=await fetch('/informe',{method:'POST',body:fd});if(!r.ok)throw new Error('Error '+r.status);const d=await r.json();const a=document.createElement('a');a.href=d.url;a.download='informe_florascan.pdf';document.body.appendChild(a);a.click();document.body.removeChild(a);$('estado').textContent='✅ Informe descargado'}catch(e){alert('Error informe: '+e.message)}}
@@ -383,10 +584,31 @@ function compartirResultado(){
   }
 }
 
-function volver(){
-  show('jardin');
+// Función para volver atrás explícitamente al pulsar el botón "← Volver"
+function volver() {
+  if (window.history.length > 1 && history.state && history.state.seccion === 'resultado') {
+    history.back(); // Dispara el evento popstate de forma natural
+  } else {
+    show('jardin'); // Fallback directo a Mi Jardín
+  }
 }
 
+// Escuchador del gesto / botón físico de ATRÁS de Android o navegador
+window.addEventListener('popstate', (ev) => {
+  navegandoHistorial = true;
+  if (ev.state && ev.state.seccion) {
+    show(ev.state.seccion, false);
+  } else {
+    // Si no hay estado en la pila, volvemos a la vista principal por defecto
+    show('jardin', false);
+  }
+  navegandoHistorial = false;
+});
+
+// Inicialización del estado base del historial al cargar la app
+window.addEventListener('DOMContentLoaded', () => {
+  history.replaceState({ seccion: 'jardin' }, '', '#jardin');
+});
 let splashTimer=null,splashSeg=5;
 const tg=$('tgAvisos');if(tg)tg.checked=LS.get('avisosRiego',true);
 const ts=$('tgSonido');if(ts)ts.checked=LS.get('sonidoScan',false);

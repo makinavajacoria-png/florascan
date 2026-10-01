@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
 
+
 try:
     from pillow_heif import register_heif_opener
     register_heif_opener()
@@ -45,6 +46,13 @@ GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 QWEN_KEY = os.getenv("QWEN_API_KEY", "").strip()
 QWEN_BASE = os.getenv("QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1").rstrip("/")
 QWEN_MODELOS = [m.strip() for m in os.getenv("QWEN_MODELOS", "qwen/qwen2.5-vl-72b-instruct").split(",") if m.strip()]
+
+# ============================================================
+# EJECUTOR GLOBAL DE HILOS (Optimización de CPU en Render)
+# ============================================================
+from concurrent.futures import ThreadPoolExecutor
+
+EXECUTOR = ThreadPoolExecutor(max_workers=2)
 
 app = FastAPI(title="FloraScan API", version="4.9")
 
@@ -336,7 +344,7 @@ def identificar_plantnet(img_bytes):
             "https://my-api.plantnet.org/v2/identify/all",
             params={"api-key": PLANTNET_KEY, "lang": "es"},
             files={"images": ("foto.jpg", img_bytes, "image/jpeg")},
-            timeout=30,
+            timeout=8,  # ← CAMBIAR AQUÍ (estaba en 30)
         )
         r.raise_for_status()
         out = []
@@ -549,7 +557,7 @@ def _pedir_texto_gemini(modelo, prompt, img_b64, forzar_json):
         r = requests.post(
             url, params={"key": GEMINI_KEY},
             json={"contents": [{"parts": partes}], "generationConfig": cfg},
-            timeout=60,
+            timeout=10,
         )
         if r.status_code == 404:
             print(f"⚠️ Gemini modelo no disponible: {modelo}")
@@ -647,7 +655,7 @@ def diagnostico_qwen(img, especie_contexto=None):
                     "temperature": 0.2,
                     "max_tokens": 2048,
                 },
-                timeout=90,
+                timeout=10,
             )
 
             print(f"📡 Qwen ({modelo}): Status {r.status_code}")
@@ -821,15 +829,13 @@ async def analizar(imagen: UploadFile = File(...)):
 
     # ⚡ PARALELIZAR: lanzar Pl@ntNet + identificación local + diagnóstico al mismo tiempo
     import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-    
-    executor = ThreadPoolExecutor(max_workers=3)
+
     loop = asyncio.get_event_loop()
-    
-    # Lanzar todas las tareas en paralelo
-    task_plantnet = loop.run_in_executor(executor, identificar_plantnet, img_bytes_jpeg)
-    task_local = loop.run_in_executor(executor, identificar_local, img)
-    task_gemini = loop.run_in_executor(executor, diagnostico_gemini, img, None)  # Sin especie_contexto todavía
+
+    # Usamos el EXECUTOR global definido al principio del archivo
+    task_plantnet = loop.run_in_executor(EXECUTOR, identificar_plantnet, img_bytes_jpeg)
+    task_local = loop.run_in_executor(EXECUTOR, identificar_local, img)
+    task_gemini = loop.run_in_executor(EXECUTOR, diagnostico_gemini, img, None)
     
     # Esperar resultados
     plantnet, local, ia_gemini = await asyncio.gather(task_plantnet, task_local, task_gemini, return_exceptions=True)

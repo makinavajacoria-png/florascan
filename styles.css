@@ -301,8 +301,49 @@ h1,.result-title,.vacio h2,.pw h2{font-family:'Fraunces',serif;letter-spacing:-.
 .legal-box p{font-size:14px;color:#4B5563;margin-bottom:10px;line-height:1.6}
 /* === PANTALLA DE RESULTADO === */
 #s-resultado{background:#E8F5E9;padding:0}
-.res-header{display:flex;justify-content:space-between;align-items:center;padding:calc(14px + env(safe-area-inset-top, 34px)) 20px 12px;background:#E8F5E9}
-.btn-back,.btn-share{background:none;border:none;font-size:16px;color:#1B5E20;font-weight:600;cursor:pointer}
+.res-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: calc(14px + env(safe-area-inset-top, 20px)) 20px 12px;
+  background: #E8F5E9;
+  position: sticky;
+  top: 0;
+  z-index: 15;
+}
+
+.btn-back {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(27, 94, 32, 0.15);
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1B5E20;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  transition: transform 0.15s ease, background 0.2s ease;
+}
+
+.btn-back:active {
+  transform: scale(0.94);
+  background: #ffffff;
+}
+
+.btn-share {
+  background: none;
+  border: none;
+  font-size: 14px;
+  color: #1B5E20;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 8px 12px;
+}
 .res-content{padding:0 20px 20px;overflow-y:auto;height:calc(100vh - 60px)}
 .res-foto-wrap{position:relative;margin-bottom:20px;overflow:hidden;border-radius:20px}
 .res-foto{width:100%;height:280px;object-fit:cover;border-radius:20px;box-shadow:0 4px 20px rgba(0,0,0,.1);display:block}
