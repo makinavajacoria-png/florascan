@@ -574,13 +574,34 @@ function abrirPaywallRescate(){
   abrirPaywall();
 }
 
-function compartirResultado(){
-  const nombre=$('resNombre').textContent;
-  const texto=`Acabo de identificar ${nombre} con FloraScan 🌿`;
-  if(navigator.share){
-    navigator.share({title:'FloraScan',text:texto}).catch(()=>{});
-  }else{
-    alert('Compartir no disponible en este navegador');
+async function compartirResultado() {
+  const nombre = $('resNombre').textContent || 'esta planta';
+  const texto = `¡Mira la planta que he identificado con FloraScan! 🌿 (${nombre})`;
+  const url = window.location.href;
+
+  // Option 1: Usar Web Share API nativa si está disponible (Móviles / HTTPS)
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: 'FloraScan 🌿',
+        text: texto,
+        url: url
+      });
+      return;
+    } catch (err) {
+      // Si el usuario cancela el menú de compartir, no hacemos nada
+      if (err.name === 'AbortError') return;
+    }
+  }
+
+  // Option 2: Fallback para navegadores sin soporte (Copiar al portapapeles)
+  try {
+    const textoACompartir = `${texto} - ${url}`;
+    await navigator.clipboard.writeText(textoACompartir);
+    alert('📋 ¡Enlace e información copiados al portapapeles!');
+  } catch (err) {
+    // Fallback final antiguo por si falla el portapapeles moderno
+    alert(`Copia este texto para compartir:\n\n${texto}`);
   }
 }
 
