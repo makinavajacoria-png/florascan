@@ -1,5 +1,5 @@
 """
-FloraScan — Backend v4.11 (estabilización y medición de tiempos)
+Plantorum — Backend v4.11 (estabilización y medición de tiempos)
 - Gemini (principal) + Qwen (respaldo) + modelo local (último recurso).
 - Pl@ntNet priorizado para identificación.
 - Logs mejorados para depurar fallos.
@@ -72,8 +72,187 @@ EXECUTOR = ThreadPoolExecutor(max_workers=4)
 MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(10 * 1024 * 1024)))  # 10 MB
 STATS_TOKEN = os.getenv("STATS_TOKEN", "").strip()
 
-app = FastAPI(title="FloraScan API", version="4.11")
+app = FastAPI(title="Plantorum API", version="4.11")
 
+
+
+# PLANTORUM: CUOTA DE COSTE EN EL SERVIDOR
+# SQLite en almacenamiento persistente, cookie de dispositivo firmada y huella de IP.
+# No se aceptan planes Pro declarados por el navegador.
+import sqlite3
+import hashlib
+import hmac
+import secrets
+import uuid
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from http.cookies import SimpleCookie
+from threading import RLock
+
+QUOTA_DAILY_LIMIT = int(os.getenv("QUOTA_DAILY_LIMIT", "100"))
+QUOTA_DB_PATH = Path(os.getenv("QUOTA_DB_PATH", str(BASE / "plantorum_cuotas.sqlite3")))
+QUOTA_SECRET_PATH = QUOTA_DB_PATH.with_suffix(".secret")
+QUOTA_LOCK = RLock()
+QUOTA_COOKIE = "plantorum_device"
+QUOTA_TIMEZONE = ZoneInfo(os.getenv("QUOTA_TIMEZONE", "Europe/Madrid"))
+
+def _quota_secret():
+    # El secreto se conserva entre reinicios; la carpeta DEBE ser persistente.
+    QUOTA_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    key = os.getenv("QUOTA_SECRET", "").encode()
+    if key:
+        if len(key) < 32:
+            raise RuntimeError("QUOTA_SECRET debe tener al menos 32 caracteres")
+        return key
+    if QUOTA_SECRET_PATH.exists():
+        return QUOTA_SECRET_PATH.read_bytes()
+    key = secrets.token_bytes(32)
+    try:
+        with QUOTA_SECRET_PATH.open("xb") as f:
+            f.write(key)
+    except FileExistsError:
+        key = QUOTA_SECRET_PATH.read_bytes()
+    return key
+
+QUOTA_SECRET_KEY = _quota_secret()
+
+def _quota_hash(value):
+    return hmac.new(QUOTA_SECRET_KEY, value.encode(), hashlib.sha256).hexdigest()
+
+def _quota_device_cookie():
+    device_id = uuid.uuid4().hex
+    sig = _quota_hash("device:" + device_id)
+    return device_id + "." + sig
+
+def _quota_device_id(raw):
+    if not raw or "." not in raw:
+        return None
+    ident, sig = raw.split(".", 1)
+    if len(ident) != 32 or any(c not in "0123456789abcdef" for c in ident):
+        return None
+    if not hmac.compare_digest(_quota_hash("device:" + ident), sig):
+        return None
+    return ident
+
+def _quota_init():
+    with sqlite3.connect(QUOTA_DB_PATH, timeout=15) as conn:
+        conn.execute("PRAGMA busy_timeout=15000")
+        conn.execute("CREATE TABLE IF NOT EXISTS daily_quota (day TEXT NOT NULL, kind TEXT NOT NULL, key_hash TEXT NOT NULL, used INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(day,kind,key_hash))")
+        conn.commit()
+
+_quota_init()
+
+def _quota_ip(request):
+    # No confiar en X-Forwarded-For sin configurar correctamente el proxy.
+    # Configurar --proxy-headers y --forwarded-allow-ips solo para proxies de confianza.
+    return request.client.host if request.client else "unknown"
+
+def _quota_reserve(ip, device_id):
+    day = datetime.datetime.now(QUOTA_TIMEZONE).strftime("%Y-%m-%d")
+    keys = [("ip", _quota_hash("ip:" + ip)), ("device", _quota_hash("device-quota:" + device_id))]
+    with QUOTA_LOCK:
+        with sqlite3.connect(QUOTA_DB_PATH, timeout=15, isolation_level=None) as conn:
+            conn.execute("PRAGMA busy_timeout=15000")
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                counts = []
+                for kind, key in keys:
+                    row = conn.execute("SELECT used FROM daily_quota WHERE day=? AND kind=? AND key_hash=?", (day, kind, key)).fetchone()
+                    counts.append(row[0] if row else 0)
+                if any(n >= QUOTA_DAILY_LIMIT for n in counts):
+                    conn.execute("ROLLBACK")
+                    return False, max(0, QUOTA_DAILY_LIMIT-max(counts))
+                for kind, key in keys:
+                    conn.execute("INSERT INTO daily_quota(day,kind,key_hash,used) VALUES(?,?,?,1) ON CONFLICT(day,kind,key_hash) DO UPDATE SET used=used+1", (day,kind,key))
+                conn.execute("COMMIT")
+                return True, QUOTA_DAILY_LIMIT-max(counts)-1
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+
+def _quota_continue_token(img_bytes, ip, device):
+    expiry = int(time.time()) + 900
+    digest = hashlib.sha256(img_bytes).hexdigest()
+    payload = f"{expiry}:{digest}:{_quota_hash('ip:' + ip)}:{_quota_hash('device-quota:' + device)}"
+    sig = hmac.new(QUOTA_SECRET_KEY, payload.encode(), hashlib.sha256).hexdigest()
+    return f"{expiry}.{digest}.{sig}"
+
+def _quota_redeem(token, img_bytes, ip, device):
+    try:
+        expiry, digest, sig = token.split('.')
+        if int(expiry) < time.time() or int(expiry) > time.time() + 901:
+            return False
+        if not hmac.compare_digest(digest, hashlib.sha256(img_bytes).hexdigest()):
+            return False
+        payload = f"{expiry}:{digest}:{_quota_hash('ip:' + ip)}:{_quota_hash('device-quota:' + device)}"
+        expected = hmac.new(QUOTA_SECRET_KEY, payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return False
+        with QUOTA_LOCK:
+            with sqlite3.connect(QUOTA_DB_PATH, timeout=15, isolation_level=None) as conn:
+                conn.execute('BEGIN IMMEDIATE')
+                conn.execute('CREATE TABLE IF NOT EXISTS used_continuations (signature TEXT PRIMARY KEY, expiry INTEGER NOT NULL)')
+                conn.execute('DELETE FROM used_continuations WHERE expiry < ?', (int(time.time()),))
+                try:
+                    conn.execute('INSERT INTO used_continuations(signature,expiry) VALUES(?,?)', (sig, int(expiry)))
+                    conn.execute('COMMIT')
+                    return True
+                except sqlite3.IntegrityError:
+                    conn.execute('ROLLBACK')
+                    return False
+    except Exception:
+        return False
+
+@app.middleware("http")
+async def proteger_cuotas(request: Request, call_next):
+    if request.method != "POST" or request.url.path not in ("/identificar", "/analizar", "/informe"):
+        return await call_next(request)
+    raw = request.cookies.get(QUOTA_COOKIE)
+    ident = _quota_device_id(raw)
+    fresh = not ident
+    if fresh:
+        raw = _quota_device_cookie()
+        ident = raw.split(".", 1)[0]
+    request.state.quota_device_id = ident
+    # Continuación firmada: la misma foto puede pasar de identificación a salud
+    # una sola vez, durante 15 minutos, sin gastar otra cuota.
+    if request.url.path == "/analizar" and request.headers.get("X-Plantorum-Continuation"):
+        try:
+            body = await request.body()
+            # Se valida el token sobre la foto subida, no sobre una cadena arbitraria.
+            from starlette.datastructures import UploadFile as StarletteUploadFile
+            form = await request.form()
+            uploaded = form.get('imagen')
+            photo = await uploaded.read() if isinstance(uploaded, StarletteUploadFile) else b''
+            if photo and _quota_redeem(request.headers.get("X-Plantorum-Continuation"), photo, _quota_ip(request), ident):
+                request.state.plantorum_prevalidated = True
+                response = await call_next(request)
+                if fresh:
+                    response.set_cookie(QUOTA_COOKIE, raw, max_age=365*86400, httponly=True, secure=request.url.scheme=="https", samesite="lax", path="/")
+                return response
+        except Exception as exc:
+            print(f"⚠️ Continuación no válida: {type(exc).__name__}")
+        # No aceptar una continuación inválida: aplica cuota normal.
+    try:
+        permitido, restantes = _quota_reserve(_quota_ip(request), ident)
+    except Exception as exc:
+        # Registrar el error real en la consola sin revelar datos privados al navegador.
+        import traceback
+        print(f"❌ [CUOTAS SQLITE] {type(exc).__name__}: {exc}", flush=True)
+        print(f"📁 [CUOTAS SQLITE] Base de datos: {QUOTA_DB_PATH}", flush=True)
+        traceback.print_exc()
+        # Fail closed: nunca permitir consultas costosas sin registrar la cuota.
+        return JSONResponse(status_code=503, content={"detail":"El control de consultas no está disponible. Revisa la consola del servidor."})
+    if not permitido:
+        response = JSONResponse(status_code=429, content={"detail":"Has alcanzado el límite de 3 consultas gratuitas de hoy. Vuelve mañana."})
+    else:
+        response = await call_next(request)
+    response.headers["X-Plantorum-Quota-Remaining"] = str(restantes)
+    if fresh:
+        response.set_cookie(QUOTA_COOKIE, raw, max_age=365*86400, httponly=True, secure=request.url.scheme=="https", samesite="lax", path="/")
+    return response
 
 @app.middleware("http")
 async def medir_tiempo_peticion(request, call_next):
@@ -84,7 +263,7 @@ async def medir_tiempo_peticion(request, call_next):
     finally:
         segundos = time.perf_counter() - inicio
         if request.url.path == "/analizar":
-            print(f"⏱️ [FloraScan TOTAL] {request.method} {request.url.path} en {segundos:.2f} s")
+            print(f"⏱️ [Plantorum TOTAL] {request.method} {request.url.path} en {segundos:.2f} s")
         elif request.url.path not in ("/", "/favicon.ico"):
             print(f"⏱️ [HTTP TOTAL] {request.method} {request.url.path} en {segundos:.2f} s")
 
@@ -634,7 +813,7 @@ def _pedir_texto_gemini(modelo, prompt, img_b64, forzar_json, tipo="Gemini"):
         cfg["response_mime_type"] = "application/json"
     try:
         r = _post_medido(f"Gemini {modelo} intento 1",
-            url, params={"key": GEMINI_KEY},
+            url, headers={"x-goog-api-key": GEMINI_KEY},
             json={"contents": [{"parts": partes}], "generationConfig": cfg},
             timeout=20,
         )
@@ -645,7 +824,7 @@ def _pedir_texto_gemini(modelo, prompt, img_b64, forzar_json, tipo="Gemini"):
             print(f"⚠️ Gemini ({modelo}): {r.status_code} — reintentando en 2 s")
             time.sleep(2)
             r = _post_medido(f"Gemini {modelo} reintento",
-                url, params={"key": GEMINI_KEY},
+                url, headers={"x-goog-api-key": GEMINI_KEY},
                 json={"contents": [{"parts": partes}], "generationConfig": cfg},
                 timeout=20,
             )
@@ -1051,32 +1230,50 @@ def _identificar_solo_gemini(img):
     return None
 
 @app.post("/identificar")
-async def identificar_solo(imagen: UploadFile = File(...)):
-    img=await leer_imagen_validada(imagen)
-    loop=asyncio.get_running_loop()
+async def identificar_solo(request: Request, imagen: UploadFile = File(...)):
+    img = await leer_imagen_validada(imagen)
+    await imagen.seek(0)
+    photo_bytes = await imagen.read()
+    await imagen.seek(0)
+    loop = asyncio.get_running_loop()
+    # Pl@ntNet primero: evita dos llamadas a Gemini cuando la identificación es fiable.
     try:
-        validacion=await asyncio.wait_for(loop.run_in_executor(EXECUTOR,detectar_si_es_planta,img),timeout=12.0)
-    except Exception:
-        raise HTTPException(status_code=503,detail="No podemos verificar la fotografía ahora mismo.")
-    if validacion is False:
-        raise HTTPException(status_code=422,detail="No hemos detectado una planta con suficiente seguridad.")
-    if validacion is None:
-        raise HTTPException(status_code=503,detail="No podemos verificar la fotografía ahora mismo.")
-    try:
-        resultado=await asyncio.wait_for(loop.run_in_executor(EXECUTOR,_identificar_solo_gemini,img),timeout=35.0)
-    except Exception:
-        resultado=None
+        jpeg = imagen_a_jpeg_bytes(img, max_px=1024)
+        candidatos = await asyncio.wait_for(loop.run_in_executor(EXECUTOR, identificar_plantnet, jpeg), timeout=12.0)
+    except Exception as exc:
+        print(f"⚠️ Pl@ntNet identificación: {exc}")
+        candidatos = []
+    resultado = None
+    if candidatos and candidatos[0].get('confianza', 0) >= 0.40 and candidatos[0].get('nombre_cientifico'):
+        resultado = candidatos[0]
+    if resultado is None:
+        # Gemini se usa solo cuando Pl@ntNet no ofrece un resultado suficientemente fiable.
+        try:
+            validacion = await asyncio.wait_for(loop.run_in_executor(EXECUTOR, detectar_si_es_planta, img), timeout=12.0)
+        except Exception:
+            validacion = None
+        if validacion is False:
+            raise HTTPException(422, "No hemos detectado una planta con suficiente seguridad.")
+        if validacion is None:
+            raise HTTPException(503, "No podemos verificar la fotografía ahora mismo.")
+        try:
+            resultado = await asyncio.wait_for(loop.run_in_executor(EXECUTOR, _identificar_solo_gemini, img), timeout=35.0)
+        except Exception:
+            resultado = None
     if not resultado:
-        raise HTTPException(status_code=503,detail="No se ha podido identificar la especie con suficiente confianza.")
+        raise HTTPException(503, "No se ha podido identificar la especie con suficiente confianza.")
+    # El token es de un solo uso y está ligado a foto, IP y dispositivo.
+    resultado = dict(resultado)
+    resultado['continuacion_salud'] = _quota_continue_token(photo_bytes, _quota_ip(request), _quota_device_id(request.cookies.get(QUOTA_COOKIE)) or getattr(request.state, 'quota_device_id', ''))
     return resultado
 
 @app.post("/analizar")
-async def analizar(imagen: UploadFile = File(...)):
+async def analizar(request: Request, imagen: UploadFile = File(...)):
     img = await leer_imagen_validada(imagen)
     # Validar contenido antes de invocar el diagnóstico (evita coches -> 'olivo sano').
     loop = asyncio.get_running_loop()
     try:
-        es_planta = await asyncio.wait_for(
+        es_planta = True if getattr(request.state, 'plantorum_prevalidated', False) else await asyncio.wait_for(
             loop.run_in_executor(EXECUTOR, detectar_si_es_planta, img),
             timeout=12.0
         )
@@ -1297,7 +1494,7 @@ def generar_informe_pdf(d):
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 20)
     pdf.set_text_color(18, 59, 44)
-    pdf.cell(0, 12, "FloraScan - Informe detallado", ln=True, align="C")
+    pdf.cell(0, 12, "Plantorum - Informe detallado", ln=True, align="C")
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(110, 118, 110)
     pdf.cell(0, 8, datetime.date.today().strftime("%d/%m/%Y"), ln=True, align="C")
@@ -1444,6 +1641,17 @@ def stats(x_stats_token: str = Header(default="", alias="X-Stats-Token")):
     }
 
 
+
+@app.get("/assets/{asset_name}")
+def asset_webp(asset_name: str):
+    import re
+    if not re.fullmatch(r"plantorum-(?:png|jpeg)-[1-9][0-9]*\.webp", asset_name):
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    path = BASE / "assets" / asset_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Archivo no encontrado")
+    return FileResponse(path, media_type="image/webp", headers={"Cache-Control":"public, max-age=31536000, immutable"})
+
 @app.get("/app")
 def interfaz():
     return FileResponse(BASE / "app.html")
@@ -1474,7 +1682,7 @@ def script():
 @app.get("/")
 def raiz():
     return {
-        "estado": "FloraScan API activa 🌿",
+        "estado": "Plantorum API activa 🌿",
         "version": "4.10",
         "app": "/app", "docs": "/docs",
         "gemini_configurado": bool(GEMINI_KEY),
@@ -1485,4 +1693,4 @@ def raiz():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
