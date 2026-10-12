@@ -1028,6 +1028,48 @@ Responde solo con el JSON.
     return None
 
 
+# Identificación botánica independiente: no ejecuta diagnóstico de salud.
+def _identificar_solo_gemini(img):
+    if not GEMINI_KEY:
+        return None
+    foto=base64.b64encode(imagen_a_jpeg_bytes(img,max_px=1024)).decode("utf-8")
+    prompt=("Identifica exclusivamente la especie vegetal visible en la imagen. "
+            "No diagnostiques salud, enfermedades ni tratamientos. "
+            "Responde SOLO con JSON válido: "
+            "{\"nombre_comun\":\"...\",\"nombre_cientifico\":\"...\",\"confianza\":0.0}. "
+            "Confianza entre 0 y 1; si no puedes identificar, usa confianza 0 y nombres vacíos.")
+    for modelo in MODELOS_GEMINI:
+        texto=_pedir_texto_gemini(modelo,prompt,foto,forzar_json=True,tipo="SOLO_IDENTIFICACION")
+        if not texto or texto=="no_modelo":continue
+        try:
+            d=extraer_json(texto)
+            if not isinstance(d,dict):continue
+            confianza=max(0.,min(1.,float(d.get("confianza",0))))
+            if confianza<0.55 or not d.get("nombre_cientifico"):return None
+            return {"nombre_comun":str(d.get("nombre_comun") or "Planta"),"nombre_cientifico":str(d["nombre_cientifico"]),"confianza":confianza}
+        except (ValueError,TypeError,KeyError):continue
+    return None
+
+@app.post("/identificar")
+async def identificar_solo(imagen: UploadFile = File(...)):
+    img=await leer_imagen_validada(imagen)
+    loop=asyncio.get_running_loop()
+    try:
+        validacion=await asyncio.wait_for(loop.run_in_executor(EXECUTOR,detectar_si_es_planta,img),timeout=12.0)
+    except Exception:
+        raise HTTPException(status_code=503,detail="No podemos verificar la fotografía ahora mismo.")
+    if validacion is False:
+        raise HTTPException(status_code=422,detail="No hemos detectado una planta con suficiente seguridad.")
+    if validacion is None:
+        raise HTTPException(status_code=503,detail="No podemos verificar la fotografía ahora mismo.")
+    try:
+        resultado=await asyncio.wait_for(loop.run_in_executor(EXECUTOR,_identificar_solo_gemini,img),timeout=35.0)
+    except Exception:
+        resultado=None
+    if not resultado:
+        raise HTTPException(status_code=503,detail="No se ha podido identificar la especie con suficiente confianza.")
+    return resultado
+
 @app.post("/analizar")
 async def analizar(imagen: UploadFile = File(...)):
     img = await leer_imagen_validada(imagen)
