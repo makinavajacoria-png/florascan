@@ -780,18 +780,51 @@ const tg=$('tgAvisos');if(tg)tg.checked=LS.get('avisosRiego',true);
 const ts=$('tgSonido');if(ts)ts.checked=LS.get('sonidoScan',false);
 function saltarSplash(dest){clearInterval(splashTimer);const sp=$('splash');if(sp)sp.classList.add('off');if(dest==='scan'){abrirCamara();}else{show('jardin');}}
 show('jardin');actualizarTier();iniciarCuenta();
-function selPlan(p){planElegido=p;
-const cards=document.querySelectorAll('.pw-card');
-const map={anual:0,mensual:1,lifetime:2};
-cards.forEach((c,i)=>c.classList.toggle('sel',i===map[p]));
-const c=$('pwCta'),l=$('pwLinea');if(!c||!l)return;
-if(p==='anual'){c.textContent='COMENZAR PRUEBA GRATIS Y SUSCRIBIRSE';l.textContent='Prueba gratuita de 7 días';}
-else if(p==='mensual'){c.textContent='CONTINUAR CON PLAN MENSUAL';l.textContent='1,99 € al mes · cancela cuando quieras';}
-else if(p==='lifetime'){c.textContent='COMPRAR ACCESO DE POR VIDA';l.textContent='Pago único de 35,99 € · sin renovaciones';}}
-function comprarAhora(p){alert('Los pagos todavía no están disponibles. Esta pantalla es una vista previa de Plantorum Premium.');}
-function abrirPaywall(){const b=$('pwRescate');if(b)b.style.display='none';selPlan('anual');$('paywall').classList.add('on');}
+// Plantorum v91 — pantallas de suscripción, sin cobros simulados.
+let ptSubPantalla='planes';
+let ptSubMetodoElegido='tarjeta';
+const ptSubPlanesInfo={anual:{nombre:'Plan anual',duracion:'12 meses',precio:'49,99 €'},mensual:{nombre:'Plan mensual',duracion:'1 mes',precio:'5,99 €'},lifetime:{nombre:'De por vida',duracion:'Pago único',precio:'99,99 €'}};
+function ptSubPlan(plan){
+ if(!ptSubPlanesInfo[plan])return;
+ planElegido=plan;
+ document.querySelectorAll('.pt-sub-plan').forEach(x=>x.classList.toggle('selected',x.dataset.plan===plan));
+}
+function selPlan(plan){ptSubPlan(plan);}
+function ptSubMetodo(metodo){
+ ptSubMetodoElegido=metodo;
+ document.querySelectorAll('.pt-sub-method').forEach(x=>x.classList.toggle('selected',x.dataset.method===metodo));
+}
+function ptSubIr(pantalla){
+ const mapa={planes:'ptSubPlanes',metodos:'ptSubMetodos',tarjeta:'ptSubTarjeta',pendiente:'ptSubPendiente',beneficios:'ptSubBeneficios'};
+ if(!mapa[pantalla])return;
+ ptSubPantalla=pantalla;
+ document.querySelectorAll('.pt-sub-screen').forEach(x=>x.classList.toggle('active',x.id===mapa[pantalla]));
+ const titulos={planes:'Planes y precios',metodos:'Método de pago',tarjeta:'Datos de la tarjeta',pendiente:'Suscripción',beneficios:'Funciones premium'};
+ $('ptSubCabecera').textContent=titulos[pantalla];
+ const info=ptSubPlanesInfo[planElegido]||ptSubPlanesInfo.anual;
+ if($('ptSubPlanResumen'))$('ptSubPlanResumen').textContent=info.nombre;
+ if($('ptSubPlanDuracion'))$('ptSubPlanDuracion').textContent=info.duracion;
+ if($('ptSubPrecioResumen'))$('ptSubPrecioResumen').textContent=info.precio;
+ if($('ptSubPendientePlan'))$('ptSubPendientePlan').textContent=info.nombre;
+ if($('ptSubPendientePrecio'))$('ptSubPendientePrecio').textContent=info.precio;
+ $('paywall').scrollTop=0;
+}
+function ptSubVolver(){
+ const prev={planes:null,metodos:'planes',tarjeta:'metodos',pendiente:ptSubMetodoElegido==='tarjeta'?'tarjeta':'metodos',beneficios:'pendiente'};
+ if(!prev[ptSubPantalla])cerrarPaywall();else ptSubIr(prev[ptSubPantalla]);
+}
+function ptSubContinuarMetodo(){
+ if(ptSubMetodoElegido==='tarjeta')ptSubIr('tarjeta');
+ else ptSubIr('pendiente');
+}
+function comprarAhora(){abrirPaywall();}
+function abrirPaywall(){ptSubPlan('anual');ptSubIr('planes');$('paywall').classList.add('on');}
 function cerrarPaywall(){$('paywall').classList.remove('on');}
-function abrirPaywallRescate(){planElegido='rescate';abrirPaywall();const b=$('pwRescate');if(b)b.style.display='flex';}
+function abrirPaywallRescate(){
+ abrirPaywall();
+ // Mantener el acceso al rescate en el producto, sin activar compras ficticias.
+ mostrarToast('El plan de rescate estará disponible cuando se habiliten los pagos.');
+}
 let modoJardin='add';
 function accionJardin(){
   if(modoJardin==='view'){show('jardin');pintarJardin();return;}
