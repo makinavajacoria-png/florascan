@@ -164,12 +164,28 @@ function abrirLegal(t){$('legalTitulo').textContent=t==='priv'?'Política de pri
 function cerrarLegal(){$('modalLegal').classList.remove('on');}
 const LEGAL_PRIV='<p>FloraScan procesa las fotos que subes únicamente para identificar la especie y generar el diagnóstico. Las imágenes se envían a los servicios de identificación (Google Gemini, OpenRouter y Pl@ntNet) solo durante el análisis y no se almacenan en nuestros servidores.</p><p>Tu jardín, recordatorios y ajustes se guardan localmente en tu dispositivo. Puedes exportarlos o eliminarlos definitivamente desde Ajustes en cualquier momento (derechos RGPD).</p><p>No compartimos datos personales con terceros ni los usamos con fines publicitarios.</p>';
 const LEGAL_TERMS='<p>FloraScan ofrece información orientativa sobre identificación y cuidados de plantas. No sustituye el asesoramiento de un profesional de la jardinería o la fitosanidad.</p><p>Las suscripciones Pro se gestionan a través de Google Play y se renuevan automáticamente hasta que las canceles con al menos 24 horas de antelación.</p><p>El uso de la app implica la aceptación de estas condiciones y de la política de privacidad.</p>';
+function claveUsoDiario(){
+  const ahora = new Date();
+  return 'usado_' + ahora.getFullYear() + '-' +
+    String(ahora.getMonth() + 1).padStart(2, '0') + '-' +
+    String(ahora.getDate()).padStart(2, '0');
+}
+function escaneosUsadosHoy(){
+  const n = Number(LS.get(claveUsoDiario(), 0));
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+}
 function consumirEscaneo(){
-  if(tier()!=='free')return true;
-  const hoy=new Date().toDateString();
-  const u=LS.get('usado_'+hoy,0);
-  LS.set('usado_'+hoy,u+1);
-  return true; // Siempre permite analizar, el bloqueo se hace en verificarBloqueo()
+  if(tier()!=='free') return true;
+  if(escaneosUsadosHoy() >= 3){
+    alert('Has utilizado tus 3 escaneos gratuitos de hoy. Vuelve mañana o consulta los planes de Plantorum.');
+    abrirPaywall();
+    return false;
+  }
+  return true;
+}
+function registrarEscaneoExitoso(){
+  if(tier()!=='free') return;
+  LS.set(claveUsoDiario(), escaneosUsadosHoy() + 1);
 }
 
 async function abrirCamara(){$('cam').classList.add('on');try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});video.srcObject=stream;await video.play();try{zoomTrack=stream.getVideoTracks()[0];if(zoomTrack.getCapabilities().zoom)$('zoom').max=zoomTrack.getCapabilities().zoom}catch(e){}}catch(e){alert('Error cámara: '+e);cerrarCamara()}}
@@ -207,9 +223,11 @@ async function prepararBlob(b) {
 }
 
 async function analizar(blobO){
-  if(!consumirEscaneo())return;
-  const hoy=new Date().toDateString();
-bloqueoActivo=(tier()==='free'&&LS.get('usado_'+hoy,0)>3);
+  if(!blobO) return;
+  if(!consumirEscaneo()) return;
+  if(analisisEnCurso) return;
+  analisisEnCurso = true;
+  bloqueoActivo = false;
   const blob=await prepararBlob(blobO);
   ultimoBlob=blob;
   
@@ -229,8 +247,16 @@ bloqueoActivo=(tier()==='free'&&LS.get('usado_'+hoy,0)>3);
   
   try{
     const r=await fetch('/analizar',{method:'POST',body:fd});
-    if(!r.ok)throw new Error('Servidor '+r.status);
+    if(!r.ok){
+      let mensaje='Error del servidor ('+r.status+')';
+      try {
+        const errorData=await r.json();
+        if(errorData && errorData.detail) mensaje=errorData.detail;
+      } catch(e) {}
+      throw new Error(mensaje);
+    }
     const d=await r.json();
+    registrarEscaneoExitoso();
     pintar(d);
   }catch(e){
     $('resFotoWrap').classList.remove('scanning');
@@ -238,6 +264,8 @@ bloqueoActivo=(tier()==='free'&&LS.get('usado_'+hoy,0)>3);
     $('resComun').textContent=e.message;
     $('resAlerta').innerHTML='<span class="icon">❌</span>Error al analizar';
     $('resRecomendaciones').innerHTML='<p style="color:#F44336">No se pudo completar el análisis. Intenta de nuevo.</p>';
+  }finally{
+    analisisEnCurso = false;
   }
 }
 
@@ -556,6 +584,7 @@ if(b)b.textContent='[+] Añadir a "Mi Jardín"';
 }
 
 let bloqueoActivo=false;
+let analisisEnCurso=false;
 
 function verificarBloqueo(){
   const lock=$('resLock');

@@ -1,5 +1,5 @@
 """
-FloraScan — Backend v4.9
+FloraScan — Backend v4.11 (estabilización y medición de tiempos)
 - Gemini (principal) + Qwen (respaldo) + modelo local (último recurso).
 - Pl@ntNet priorizado para identificación.
 - Logs mejorados para depurar fallos.
@@ -18,10 +18,24 @@ from pathlib import Path
 import numpy as np
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
+
+
+def _post_medido(etiqueta, *args, **kwargs):
+    """Ejecuta requests.post y registra el tiempo real de cada intento HTTP."""
+    inicio = time.perf_counter()
+    try:
+        respuesta = requests.post(*args, **kwargs)
+        segundos = time.perf_counter() - inicio
+        print(f"⏱️ [HTTP {etiqueta}] HTTP {respuesta.status_code} en {segundos:.2f} s")
+        return respuesta
+    except Exception as exc:
+        segundos = time.perf_counter() - inicio
+        print(f"⏱️ [HTTP {etiqueta}] {type(exc).__name__} tras {segundos:.2f} s")
+        raise
 
 
 try:
@@ -51,17 +65,39 @@ QWEN_MODELOS = [m.strip() for m in os.getenv("QWEN_MODELOS", "qwen/qwen2.5-vl-72
 # EJECUTOR GLOBAL DE HILOS (Optimización de CPU en Render)
 # ============================================================
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 
-EXECUTOR = ThreadPoolExecutor(max_workers=2)
+EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
-app = FastAPI(title="FloraScan API", version="4.9")
+MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(10 * 1024 * 1024)))  # 10 MB
+STATS_TOKEN = os.getenv("STATS_TOKEN", "").strip()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="FloraScan API", version="4.11")
+
+
+@app.middleware("http")
+async def medir_tiempo_peticion(request, call_next):
+    """Mide duración total de cada petición HTTP, especialmente /analizar."""
+    inicio = time.perf_counter()
+    try:
+        return await call_next(request)
+    finally:
+        segundos = time.perf_counter() - inicio
+        if request.url.path == "/analizar":
+            print(f"⏱️ [FloraScan TOTAL] {request.method} {request.url.path} en {segundos:.2f} s")
+        elif request.url.path not in ("/", "/favicon.ico"):
+            print(f"⏱️ [HTTP TOTAL] {request.method} {request.url.path} en {segundos:.2f} s")
+
+# La interfaz se sirve desde el mismo backend. Si se necesita CORS externo,
+# definir CORS_ALLOWED_ORIGINS como una lista separada por comas.
+CORS_ALLOWED_ORIGINS = [x.strip() for x in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if x.strip()]
+if CORS_ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ALLOWED_ORIGINS,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-Stats-Token"],
+    )
 
 
 # ============================================================
@@ -340,7 +376,7 @@ def identificar_plantnet(img_bytes):
         print("⚠️ PLANTNET_API_KEY no configurada")
         return []
     try:
-        r = requests.post(
+        r = _post_medido("Pl@ntNet identificación",
             "https://my-api.plantnet.org/v2/identify/all",
             params={"api-key": PLANTNET_KEY, "lang": "es"},
             files={"images": ("foto.jpg", img_bytes, "image/jpeg")},
@@ -349,11 +385,15 @@ def identificar_plantnet(img_bytes):
         r.raise_for_status()
         out = []
         for res in r.json().get("results", [])[:3]:
-            sp = res.get("species", {})
-            sci = sp.get("scientificName")
+            sp = res.get("species", {}) or {}
+            sci = (sp.get("scientificName") or "").strip() or None
+            comun = (sp.get("commonName") or nombre_comun_es(sci) or "").strip() or None
+            # No aceptar resultados sin nombre de especie, aunque tengan score.
+            if not sci and not comun:
+                continue
             out.append({
                 "nombre_cientifico": sci,
-                "nombre_comun": sp.get("commonName") or nombre_comun_es(sci),
+                "nombre_comun": comun,
                 "confianza": round(float(res.get("score", 0)), 3),
             })
         print(f"🌿 Pl@ntNet: {out[0]['nombre_comun'] if out else 'sin resultados'} ({out[0]['confianza'] if out else 0})")
@@ -383,18 +423,15 @@ def elegir_especie(plantnet, local):
         print(f"✅ Especie elegida: Local ({local[0]['clase']})")
         return "local", textos
     
-    # Si ninguno tiene buena confianza, usa Pl@ntNet si existe
-    if plantnet:
-        textos.append(plantnet[0].get("nombre_cientifico"))
-        textos.append(plantnet[0].get("nombre_comun"))
-        print(f"⚠️ Especie elegida: Pl@ntNet con baja confianza ({plantnet[0]['nombre_comun']})")
-        return "plantnet", textos
+    # Si no hay confianza suficiente, no presentar una especie como segura.
+    if plantnet and (plantnet[0].get("nombre_cientifico") or plantnet[0].get("nombre_comun")):
+        textos.extend(x for x in (plantnet[0].get("nombre_cientifico"), plantnet[0].get("nombre_comun")) if x)
+        print(f"⚠️ Especie candidata de Pl@ntNet con baja confianza: {plantnet[0].get('nombre_comun') or plantnet[0].get('nombre_cientifico')}")
+        return "plantnet_baja_confianza", textos
     
-    # Último recurso: modelo local
+    # No usar la predicción local de baja confianza como identificación definitiva.
     if local:
-        textos.append(local[0].get("clase"))
-        print(f"⚠️ Especie elegida: Local con baja confianza ({local[0]['clase']})")
-        return "local", textos
+        print(f"⚠️ Modelo local sin confianza suficiente ({local[0].get('clase')})")
     
     print("⚠️ No se pudo identificar especie")
     return "ninguna", textos
@@ -544,7 +581,49 @@ def _texto_de_respuesta_gemini(r):
     return "".join(p.get("text", "") for p in parts).strip()
 
 
-def _pedir_texto_gemini(modelo, prompt, img_b64, forzar_json):
+def _registrar_uso_gemini(r, modelo, tipo):
+    """Registra tokens de entrada/salida devueltos por la API, sin otra llamada."""
+    try:
+        data = r.json()
+        uso = data.get("usageMetadata") or data.get("usage_metadata") or {}
+        entrada = uso.get("promptTokenCount", uso.get("prompt_token_count"))
+        salida = uso.get("candidatesTokenCount", uso.get("candidates_token_count"))
+        pensamiento = uso.get("thoughtsTokenCount", uso.get("thoughts_token_count", 0)) or 0
+        total = uso.get("totalTokenCount", uso.get("total_token_count"))
+        if entrada is None and salida is None:
+            print(f"💰 [TOKENS {tipo}] modelo={modelo}: la respuesta no incluye usageMetadata")
+            return
+
+        # Precios estándar de la API, USD por millón de tokens. Para Gemini 3.8/3.6
+        # se aplica el precio introductorio vigente hasta el 31-12-2026.
+        # Los tokens de pensamiento se suman a la salida facturable.
+        if modelo in ("gemini-3.8-flash", "gemini-3.6-flash"):
+            precio_entrada, precio_salida = 0.75, 3.75
+        elif modelo == "gemini-3.5-flash":
+            precio_entrada, precio_salida = 1.50, 9.00
+        else:
+            precio_entrada = precio_salida = None
+
+        coste = None
+        if precio_entrada is not None:
+            coste = ((entrada or 0) * precio_entrada + ((salida or 0) + pensamiento) * precio_salida) / 1_000_000
+
+        linea = (
+            f"💰 [TOKENS {tipo}] modelo={modelo} | entrada={entrada or 0} | "
+            f"salida={salida or 0} | pensamiento={pensamiento} | "
+            f"total={total if total is not None else (entrada or 0) + (salida or 0) + pensamiento}"
+        )
+        if coste is not None:
+            linea += f" | coste_estimado=${coste:.8f} USD (tarifa API de pago, sin descuentos)"
+        else:
+            linea += " | coste_estimado=no configurado para este modelo"
+        print(linea)
+    except Exception as exc:
+        print(f"⚠️ No se pudieron leer tokens de Gemini ({tipo}, {modelo}): {type(exc).__name__}")
+
+
+def _pedir_texto_gemini(modelo, prompt, img_b64, forzar_json, tipo="Gemini"):
+
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent"
     partes = [
         {"text": prompt},
@@ -554,10 +633,10 @@ def _pedir_texto_gemini(modelo, prompt, img_b64, forzar_json):
     if forzar_json:
         cfg["response_mime_type"] = "application/json"
     try:
-        r = requests.post(
+        r = _post_medido(f"Gemini {modelo} intento 1",
             url, params={"key": GEMINI_KEY},
             json={"contents": [{"parts": partes}], "generationConfig": cfg},
-            timeout=10,
+            timeout=20,
         )
         if r.status_code == 404:
             print(f"⚠️ Gemini modelo no disponible: {modelo}")
@@ -565,12 +644,13 @@ def _pedir_texto_gemini(modelo, prompt, img_b64, forzar_json):
         if r.status_code in (429, 503):
             print(f"⚠️ Gemini ({modelo}): {r.status_code} — reintentando en 2 s")
             time.sleep(2)
-            r = requests.post(
+            r = _post_medido(f"Gemini {modelo} reintento",
                 url, params={"key": GEMINI_KEY},
                 json={"contents": [{"parts": partes}], "generationConfig": cfg},
-                timeout=60,
+                timeout=20,
             )
         r.raise_for_status()
+        _registrar_uso_gemini(r, modelo, tipo)
         return _texto_de_respuesta_gemini(r)
     except requests.HTTPError as e:
         code = getattr(getattr(e, "response", None), "status_code", None)
@@ -591,7 +671,7 @@ def diagnostico_gemini(img, especie_contexto=None):
     img_b64 = base64.b64encode(img_bytes).decode("utf-8")
 
     for modelo in MODELOS_GEMINI:
-        texto = _pedir_texto_gemini(modelo, prompt, img_b64, forzar_json=True)
+        texto = _pedir_texto_gemini(modelo, prompt, img_b64, forzar_json=True, tipo="DIAGNOSTICO")
         if texto == "no_modelo" or texto is None:
             continue
         resultado = None
@@ -599,7 +679,7 @@ def diagnostico_gemini(img, especie_contexto=None):
             resultado = extraer_json(texto)
         except ValueError:
             print(f"⚠️ Gemini ({modelo}): JSON inválido. Texto: {texto[:150]!r}")
-            texto2 = _pedir_texto_gemini(modelo, prompt, img_b64, forzar_json=False)
+            texto2 = _pedir_texto_gemini(modelo, prompt, img_b64, forzar_json=False, tipo="DIAGNOSTICO_REINTENTO")
             if texto2 and texto2 != "no_modelo":
                 try:
                     resultado = extraer_json(texto2)
@@ -640,7 +720,7 @@ def diagnostico_qwen(img, especie_contexto=None):
     for modelo in QWEN_MODELOS:
         try:
             print(f"🔄 Llamando a Qwen ({modelo})...")
-            r = requests.post(
+            r = _post_medido(f"Qwen {modelo} intento 1",
                 f"{QWEN_BASE}/chat/completions",
                 headers={"Authorization": f"Bearer {QWEN_KEY}", "Content-Type": "application/json"},
                 json={
@@ -666,7 +746,7 @@ def diagnostico_qwen(img, especie_contexto=None):
             if r.status_code in (429, 503):
                 print(f"⚠️ Qwen ({modelo}): {r.status_code} — reintentando en 2 s")
                 time.sleep(2)
-                r = requests.post(
+                r = _post_medido(f"Qwen {modelo} reintento",
                     f"{QWEN_BASE}/chat/completions",
                     headers={"Authorization": f"Bearer {QWEN_KEY}", "Content-Type": "application/json"},
                     json={
@@ -681,7 +761,7 @@ def diagnostico_qwen(img, especie_contexto=None):
                         "temperature": 0.2,
                         "max_tokens": 2048,
                     },
-                    timeout=90,
+                    timeout=15,
                 )
                 print(f"📡 Qwen ({modelo}) retry: Status {r.status_code}")
             
@@ -811,40 +891,190 @@ def score_desde_estado(estado, confianza=0.7):
 
 
 # ============================================================
+# VALIDACIÓN DE ENTRADAS
+# ============================================================
+
+async def leer_imagen_validada(upload: UploadFile) -> Image.Image:
+    """Lee una imagen con límite de tamaño y valida que Pillow pueda decodificarla."""
+    contenido = await upload.read(MAX_IMAGE_BYTES + 1)
+    if not contenido:
+        raise HTTPException(status_code=400, detail="La imagen está vacía.")
+    if len(contenido) > MAX_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"La imagen supera el límite de {MAX_IMAGE_BYTES // (1024 * 1024)} MB."
+        )
+    try:
+        imagen = Image.open(io.BytesIO(contenido))
+        imagen = ImageOps.exif_transpose(imagen)
+        imagen.load()
+        if imagen.mode not in ("RGB", "RGBA"):
+            imagen = imagen.convert("RGB")
+        return imagen
+    except Exception:
+        raise HTTPException(status_code=400, detail="No se pudo leer la imagen. Usa JPG, PNG o WEBP.")
+
+
+# ============================================================
 # ENDPOINTS
 # ============================================================
 import asyncio
 from fastapi import File, UploadFile
 from fastapi.responses import JSONResponse
 
+def detectar_si_es_planta(img):
+    """
+    Valida que el sujeto principal sea una planta real.
+    Si la respuesta es ambigua o incompleta, no autoriza el diagnóstico.
+    """
+    if not GEMINI_KEY:
+        print("⚠️ Sin GEMINI_API_KEY: no se puede validar la planta")
+        return None
+
+    img_b64 = base64.b64encode(
+        imagen_a_jpeg_bytes(img, max_px=768)
+    ).decode("utf-8")
+
+    prompt = """
+Analiza visualmente la imagen antes de permitir un diagnóstico botánico.
+
+Devuelve exclusivamente un JSON válido con estos campos:
+{
+  "es_planta": false,
+  "confianza": 0.0,
+  "sujeto_principal": "persona, vehículo, objeto, planta u otro",
+  "evidencia_vegetal": "descripción concreta de hojas, tallo,
+  flores u otras estructuras vegetales visibles",
+  "motivo": "explicación breve"
+}
+
+REGLAS OBLIGATORIAS:
+1. es_planta solo puede ser true si una planta REAL es claramente
+   visible y constituye el sujeto principal de la fotografía.
+2. Si el sujeto principal es una persona, un rostro, un animal,
+   un coche, un edificio u otro objeto, devuelve false.
+3. No confundas ropa, cabello, piel, fondos verdes, dibujos ni
+   objetos decorativos con estructuras vegetales.
+4. No deduzcas que hay una planta solo porque podría estar fuera
+   del encuadre o en el fondo.
+5. Si no puedes distinguir estructuras vegetales reales, devuelve
+   false.
+6. Si la imagen muestra una persona sosteniendo una planta, solo
+   devuelve true si la planta es claramente visible y es el sujeto
+   principal.
+7. No inventes hojas, tallos ni flores que no se vean.
+8. La confianza debe reflejar la seguridad de que el sujeto
+   principal es realmente una planta.
+
+Responde solo con el JSON.
+"""
+
+    for modelo in MODELOS_GEMINI:
+        texto = _pedir_texto_gemini(
+            modelo, prompt, img_b64, forzar_json=True, tipo="VALIDACION_PLANTA"
+        )
+
+        if not texto or texto == "no_modelo":
+            continue
+
+        try:
+            data = extraer_json(texto)
+
+            es_planta = data.get("es_planta")
+            confianza = float(data.get("confianza", 0))
+            sujeto = str(
+                data.get("sujeto_principal", "")
+            ).strip().lower()
+            evidencia = str(
+                data.get("evidencia_vegetal", "")
+            ).strip().lower()
+
+            sujeto_valido = (
+                sujeto == "planta"
+                or sujeto.startswith("planta ")
+            )
+
+            evidencia_valida = (
+                bool(evidencia)
+                and evidencia not in {
+                    "ninguna", "ninguna visible",
+                    "no se observa", "no hay"
+                }
+            )
+
+            aceptada = (
+                es_planta is True
+                and confianza >= 0.85
+                and sujeto_valido
+                and evidencia_valida
+            )
+
+            print(
+                "🔎 Validación estricta:",
+                f"aceptada={aceptada},",
+                f"confianza={confianza:.2f},",
+                f"sujeto={sujeto!r},",
+                f"evidencia={evidencia[:120]!r}"
+            )
+
+            # Una respuesta JSON válida pero ambigua no autoriza
+            # a generar un diagnóstico de salud.
+            return aceptada
+
+        except (ValueError, TypeError, AttributeError) as e:
+            print(f"⚠️ Respuesta inválida del preclasificador: {e}")
+
+    print("⚠️ No se pudo confirmar visualmente la presencia de una planta")
+    return None
+
+
 @app.post("/analizar")
 async def analizar(imagen: UploadFile = File(...)):
-    img_bytes_original = await imagen.read() 
-    _stats_contar("escaneos")
+    img = await leer_imagen_validada(imagen)
+    # Validar contenido antes de invocar el diagnóstico (evita coches -> 'olivo sano').
+    loop = asyncio.get_running_loop()
     try:
-        img = Image.open(io.BytesIO(img_bytes_original))
-        img = ImageOps.exif_transpose(img)
-        img.load()
-    except Exception:
-        raise HTTPException(status_code=400, detail="No se pudo leer la imagen.")
+        es_planta = await asyncio.wait_for(
+            loop.run_in_executor(EXECUTOR, detectar_si_es_planta, img),
+            timeout=12.0
+        )
+    except Exception as e:
+        print(f"⚠️ No se pudo validar si es planta: {e}")
+        es_planta = None
 
+    if es_planta is False:
+        raise HTTPException(
+            status_code=422,
+            detail="No hemos detectado una planta con suficiente seguridad. Haz una foto de una planta real, sus hojas o sus flores e inténtalo de nuevo."
+        )
+    if es_planta is None:
+        # Fallar de forma segura: no emitir diagnósticos cuando no se ha podido validar la imagen.
+        raise HTTPException(
+            status_code=503,
+            detail="Ahora mismo no podemos comprobar si la foto contiene una planta. Inténtalo de nuevo en unos momentos."
+        )
+    # Contamos solo peticiones con imagen válida, no cargas malformadas.
+    _stats_contar("escaneos")
     img_bytes_jpeg = imagen_a_jpeg_bytes(img, max_px=1024)
     loop = asyncio.get_running_loop()
 
     # -------------------------------------------------------------
-    # 1. PLAN A: Consultar directamente a Gemini (hasta 10s)
+    # 1. PLAN A: Consultar directamente a Gemini (hasta 35s para los modelos en cascada)
     # -------------------------------------------------------------
     ia_gemini = None
+    inicio_plan_a = time.perf_counter()
     try:
         print("Plan A: Consultando a Gemini...")
         ia_gemini = await asyncio.wait_for(
             loop.run_in_executor(EXECUTOR, diagnostico_gemini, img, None),
-            timeout=10.0
+            timeout=35.0
         )
     except asyncio.TimeoutError:
-        print("⏱️ Gemini superó el tiempo límite (10s). Pasando al Plan B...")
+        print("⏱️ Gemini superó el tiempo límite (35s). Pasando al Plan B...")
     except Exception as e:
         print(f"⚠️ Error consultando Gemini: {e}. Pasando al Plan B...")
+    finally:
+        print(f"⏱️ [Plan A Gemini] {time.perf_counter() - inicio_plan_a:.2f} s (tiempo observado por el endpoint)")
 
     if ia_gemini and not MODO_PRUEBA_QWEN:
         fuente_ia = "gemini"
@@ -884,7 +1114,7 @@ async def analizar(imagen: UploadFile = File(...)):
             "especie": {
                 "fuente": fuente_ia,
                 "plantnet": [], "local": local,
-                "nombre_comun": ia.get("especie") or especie_contexto or "No identificada",
+                "nombre_comun": especie_contexto or "Planta sin identificar",
             },
             "salud": salud,
             "cuidados": cuidados,
@@ -923,13 +1153,18 @@ async def analizar(imagen: UploadFile = File(...)):
 
     # Intentar Qwen como respaldo de la IA si Gemini falló
     ia = None
+    inicio_qwen = time.perf_counter()
     try:
         ia = await asyncio.wait_for(
             loop.run_in_executor(EXECUTOR, diagnostico_qwen, img, especie_contexto),
-            timeout=10.0
+            timeout=30.0
         )
+    except asyncio.TimeoutError:
+        print("⏱️ Qwen superó el límite de 30s; se continúa con el Plan C local.")
     except Exception as e:
         print(f"Qwen de respaldo falló o no está configurado: {e}")
+    finally:
+        print(f"⏱️ [Plan Qwen] {time.perf_counter() - inicio_qwen:.2f} s (tiempo observado por el endpoint)")
 
     if ia:
         fuente_ia = "qwen"
@@ -966,7 +1201,7 @@ async def analizar(imagen: UploadFile = File(...)):
             "especie": {
                 "fuente": fuente_ia,
                 "plantnet": plantnet, "local": local,
-                "nombre_comun": ia.get("especie") or especie_contexto or "No identificada",
+                "nombre_comun": especie_contexto or "Planta sin identificar",
             },
             "salud": salud,
             "cuidados": cuidados,
@@ -1068,7 +1303,7 @@ def informe_detallado_gemini(img):
         return None
     img_b64 = base64.b64encode(imagen_a_jpeg_bytes(img, max_px=1024)).decode()
     for modelo in MODELOS_GEMINI:
-        texto = _pedir_texto_gemini(modelo, PROMPT_INFORME, img_b64, forzar_json=True)
+        texto = _pedir_texto_gemini(modelo, PROMPT_INFORME, img_b64, forzar_json=True, tipo="INFORME_DETALLADO")
         if texto in (None, "no_modelo"):
             continue
         try:
@@ -1084,7 +1319,7 @@ def informe_detallado_qwen(img):
     img_b64 = base64.b64encode(imagen_a_jpeg_bytes(img, max_px=1024)).decode()
     for modelo in QWEN_MODELOS:
         try:
-            r = requests.post(
+            r = _post_medido(f"Qwen informe {modelo}",
                 f"{QWEN_BASE}/chat/completions",
                 headers={"Authorization": f"Bearer {QWEN_KEY}", "Content-Type": "application/json"},
                 json={"model": modelo, "messages": [{"role": "user", "content": [
@@ -1105,22 +1340,16 @@ def informe_detallado_qwen(img):
 
 @app.post("/informe")
 async def informe(imagen: UploadFile = File(...)):
-    img_bytes = await imagen.read()
-    try:
-        img = Image.open(io.BytesIO(img_bytes))
-        img = ImageOps.exif_transpose(img)
-        img.load()
-    except Exception:
-        raise HTTPException(400, "No se pudo leer la imagen.")
+    img = await leer_imagen_validada(imagen)
     datos = informe_detallado_gemini(img) or informe_detallado_qwen(img)
     if not datos:
-        raise HTTPException(503, "La IA no esta disponible ahora mismo. Intentalo en unos minutos.")
-        _stats_contar("informes")
+        raise HTTPException(503, "La IA no está disponible ahora mismo. Inténtalo en unos minutos.")
     token = uuid.uuid4().hex
     INFORMES[token] = {"pdf": bytes(generar_informe_pdf(datos)), "ts": time.time()}
     ahora = time.time()
     for k in [k for k, v in INFORMES.items() if ahora - v["ts"] > 3600]:
         del INFORMES[k]
+    _stats_contar("informes")
     return {"token": token, "url": f"/informe_pdf/{token}"}
 
 
@@ -1138,26 +1367,39 @@ def informe_pdf(token: str):
 # ============================================================
 import json as _json
 STATS_FILE = BASE / "stats.json"
+_STATS_LOCK = Lock()
 
 def _stats_leer():
     try: return _json.loads(STATS_FILE.read_text(encoding="utf-8"))
     except Exception: return {"escaneos":0,"informes":0,"por_dia":{}}
 
 def _stats_contar(tipo):
-    s=_stats_leer()
-    s[tipo]=s.get(tipo,0)+1
-    dia=datetime.date.today().isoformat()
-    d=s.setdefault("por_dia",{})
-    d.setdefault(dia,{"escaneos":0,"informes":0})
-    d[dia][tipo]=d[dia].get(tipo,0)+1
-    STATS_FILE.write_text(_json.dumps(s,ensure_ascii=False))
+    # Protege incrementos simultáneos dentro de un mismo proceso.
+    with _STATS_LOCK:
+        s = _stats_leer()
+        s[tipo] = s.get(tipo, 0) + 1
+        dia = datetime.date.today().isoformat()
+        por_dia = s.setdefault("por_dia", {})
+        por_dia.setdefault(dia, {"escaneos": 0, "informes": 0})
+        por_dia[dia][tipo] = por_dia[dia].get(tipo, 0) + 1
+        temporal = STATS_FILE.with_suffix(".tmp")
+        temporal.write_text(_json.dumps(s, ensure_ascii=False), encoding="utf-8")
+        temporal.replace(STATS_FILE)
 
 @app.get("/stats")
-def stats():
-    s=_stats_leer()
-    coste=s.get("escaneos",0)*0.002 + s.get("informes",0)*0.004
-    return {**s,"coste_estimado_eur":round(coste,4),
-            "nota":"escaneo ~0,002 € · informe ~0,004 €"}
+def stats(x_stats_token: str = Header(default="", alias="X-Stats-Token")):
+    # Este endpoint revela métricas internas. Debe configurarse STATS_TOKEN.
+    if not STATS_TOKEN:
+        raise HTTPException(status_code=404, detail="Endpoint no disponible.")
+    if x_stats_token != STATS_TOKEN:
+        raise HTTPException(status_code=403, detail="No autorizado.")
+    s = _stats_leer()
+    coste = s.get("escaneos", 0) * 0.002 + s.get("informes", 0) * 0.004
+    return {
+        **s,
+        "coste_estimado_eur": round(coste, 4),
+        "nota": "Estimación orientativa fija; no equivale a facturación real de proveedores."
+    }
 
 
 @app.get("/app")
@@ -1170,11 +1412,17 @@ def estilos():
 
 @app.get("/logo.png")
 def logo():
-    return FileResponse(BASE / "logo.png", media_type="image/png")
+    path = BASE / "logo.png"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Logo no incluido en esta distribución.")
+    return FileResponse(path, media_type="image/png")
 
 @app.get("/fondo-paywall.png")
 def fondo_paywall():
-    return FileResponse(BASE / "fondo-paywall.png", media_type="image/png")
+    path = BASE / "fondo-paywall.png"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Fondo de pago no incluido en esta distribución.")
+    return FileResponse(path, media_type="image/png")
 
 @app.get("/app.js")
 def script():
@@ -1185,7 +1433,7 @@ def script():
 def raiz():
     return {
         "estado": "FloraScan API activa 🌿",
-        "version": "4.9",
+        "version": "4.10",
         "app": "/app", "docs": "/docs",
         "gemini_configurado": bool(GEMINI_KEY),
         "qwen_configurado": bool(QWEN_KEY),
