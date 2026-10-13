@@ -91,7 +91,7 @@ from fastapi.responses import JSONResponse
 from http.cookies import SimpleCookie
 from threading import RLock
 
-QUOTA_DAILY_LIMIT = int(os.getenv("QUOTA_DAILY_LIMIT", "100"))
+QUOTA_DAILY_LIMIT = int(os.getenv("QUOTA_DAILY_LIMIT", "10"))
 QUOTA_DB_PATH = Path(os.getenv("QUOTA_DB_PATH", str(BASE / "plantorum_cuotas.sqlite3")))
 QUOTA_SECRET_PATH = QUOTA_DB_PATH.with_suffix(".secret")
 QUOTA_LOCK = RLock()

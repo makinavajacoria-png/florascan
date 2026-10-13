@@ -918,3 +918,35 @@ body,.app,.sc.grad{background:#F8F7EF}
 .pt-sub-feature>span{width:42px;height:42px;flex-shrink:0;background:#0F4D3A;color:#fff;border-radius:50%;display:grid;place-items:center;font-size:24px}
 .pt-sub-feature b{display:block;font-size:13px}
 .pt-sub-feature small{display:block;color:#78867b;font-size:11px;margin-top:5px}
+
+/* Plantorum v97 — bienvenida personalizada */
+.pt-perfil-overlay[hidden]{display:none!important}
+.pt-perfil-overlay{position:fixed;inset:0;z-index:99999;background:rgba(8,38,28,.72);display:flex;align-items:center;justify-content:center;padding:20px}
+.pt-perfil-panel{width:min(100%,410px);background:#f8f7ef;border-radius:22px;padding:28px 24px;text-align:center;box-shadow:0 20px 70px #0004;color:#0f4d3a}
+.pt-perfil-panel h2{font-size:24px;margin:8px 0}.pt-perfil-panel p{margin:8px 0 20px}.pt-perfil-panel label{display:block;text-align:left;font-weight:600;font-size:14px}.pt-perfil-panel input{display:block;width:100%;margin:8px 0 14px;padding:13px;border:1px solid #a7b89f;border-radius:10px;background:#fff;color:#0f4d3a;font:inherit}
+.pt-perfil-panel button{width:100%;margin:5px 0}.pt-perfil-panel small{display:block;color:#547264;margin-top:12px}.pt-perfil-leaf{font-size:42px}
+
+
+/* Plantorum v98 — resultado en verde salvia, contraste y diagnóstico legible */
+#s-resultado,#s-resultado .res-header,#s-resultado .res-content{background:#E5EDE1!important;color:#173E30!important}
+#s-resultado .res-nombre,#s-resultado .res-info h1{color:#103F2D!important}
+#s-resultado .res-comun,#s-resultado .pt-result-eyebrow{color:#315E47!important}
+#s-resultado .btn-back{background:#F8FBF6!important;border:1px solid #A3B8A7!important;color:#123D2C!important}
+#s-resultado .btn-share{color:#123D2C!important}
+#s-resultado .res-foto-wrap{border-color:#B1C8B4!important}
+#s-resultado .res-card{background:#FAFCF8!important;border:1px solid #B7CDBA!important;color:#173E30!important;box-shadow:0 8px 22px rgba(25,69,43,.08)!important}
+#s-resultado .res-salud{background:#F3F8F0!important;border-color:#AFC8B0!important}
+#s-resultado .pt-health-heading{color:#234B37!important}
+#s-resultado .pt-health-leaf{color:#2D7650!important}
+#s-resultado .res-alerta{color:#174B34!important}
+#s-resultado .pt-health-details{background:#FFFFFF!important;border:1px solid #D7E5D6!important}
+#s-resultado .res-detalle{color:#254237!important;font-size:16px!important;line-height:1.65!important}
+#s-resultado #resDiagnostico{font-size:17px!important;line-height:1.7!important}
+#s-resultado #resDiagnostico strong{font-size:17px!important;color:#103F2D!important}
+#s-resultado .res-detalle .icon{color:#26764D!important}
+#s-resultado .res-tratamiento{background:#FAFCF8!important;color:#173E30!important}
+#s-resultado .res-tratamiento h3{color:#123F30!important}
+#s-resultado .btn-add-jardin{background:#0F4D3A!important;color:#FFFFFF!important}
+
+/* Plantorum v100: seguimiento y diálogos accesibles */
+.pt-tratamiento{background:#f5f9f3;border:1px solid #c4d9c5;border-radius:18px;padding:18px;margin:18px 0;color:#173f30}.pt-tratamiento h2,.pt-tratamiento h3{color:#0f4d3a;margin:0 0 12px}.pt-tratamiento p{line-height:1.55}.pt-tratamiento form{display:grid;gap:10px;margin:15px 0 22px}.pt-tratamiento label{font-weight:650;font-size:15px}.pt-tratamiento textarea,.pt-tratamiento select,.pt-tratamiento input{width:100%;box-sizing:border-box;border:1px solid #9cb9a2;background:#fff;color:#193e2e;border-radius:10px;padding:12px;font:inherit;font-size:16px}.pt-tratamiento-item{background:white;border:1px solid #d2e1d0;border-radius:12px;padding:12px;margin:10px 0;overflow-wrap:anywhere}.pt-tratamiento-item strong{color:#0f4d3a}.pt-tratamiento-item p{white-space:pre-wrap;margin:8px 0}.pt-tratamiento-item small{display:block;color:#42624f}.pt-evo-subtitle{margin:22px 0 10px;color:#0f4d3a}.pt-confirm-overlay:not([hidden]){position:fixed;inset:0;background:#0009;display:grid;place-items:center;z-index:99999;padding:16px}.pt-confirm-box{width:min(100%,400px);background:#f8f7ef;border-radius:18px;padding:22px;color:#163c2d;box-shadow:0 15px 50px #0004}.pt-confirm-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}.pt-confirm-box button:focus-visible,.pt-tratamiento button:focus-visible{outline:3px solid #2e7d5b;outline-offset:3px}
