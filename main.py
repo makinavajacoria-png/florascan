@@ -84,14 +84,16 @@ import hashlib
 import hmac
 import secrets
 import uuid
-from datetime import datetime
+import datetime
 from zoneinfo import ZoneInfo
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from http.cookies import SimpleCookie
 from threading import RLock
 
-QUOTA_DAILY_LIMIT = int(os.getenv("QUOTA_DAILY_LIMIT", "10"))
+QUOTA_DAILY_LIMIT = int(os.getenv("QUOTA_DAILY_LIMIT", "100"))
+# Límite por IP independiente y más alto: varias personas comparten IP (wifi, datos móviles) y no deben bloquearse entre sí.
+QUOTA_IP_LIMIT = max(QUOTA_DAILY_LIMIT, int(os.getenv("QUOTA_IP_LIMIT", "30")))
 QUOTA_DB_PATH = Path(os.getenv("QUOTA_DB_PATH", str(BASE / "plantorum_cuotas.sqlite3")))
 QUOTA_SECRET_PATH = QUOTA_DB_PATH.with_suffix(".secret")
 QUOTA_LOCK = RLock()
@@ -152,6 +154,7 @@ def _quota_ip(request):
 def _quota_reserve(ip, device_id):
     day = datetime.datetime.now(QUOTA_TIMEZONE).strftime("%Y-%m-%d")
     keys = [("ip", _quota_hash("ip:" + ip)), ("device", _quota_hash("device-quota:" + device_id))]
+    limites = {"ip": QUOTA_IP_LIMIT, "device": QUOTA_DAILY_LIMIT}
     with QUOTA_LOCK:
         with sqlite3.connect(QUOTA_DB_PATH, timeout=15, isolation_level=None) as conn:
             conn.execute("PRAGMA busy_timeout=15000")
@@ -161,16 +164,30 @@ def _quota_reserve(ip, device_id):
                 for kind, key in keys:
                     row = conn.execute("SELECT used FROM daily_quota WHERE day=? AND kind=? AND key_hash=?", (day, kind, key)).fetchone()
                     counts.append(row[0] if row else 0)
-                if any(n >= QUOTA_DAILY_LIMIT for n in counts):
+                if any(n >= limites[k] for n, (k, _) in zip(counts, keys)):
                     conn.execute("ROLLBACK")
-                    return False, max(0, QUOTA_DAILY_LIMIT-max(counts))
+                    return False, 0
                 for kind, key in keys:
                     conn.execute("INSERT INTO daily_quota(day,kind,key_hash,used) VALUES(?,?,?,1) ON CONFLICT(day,kind,key_hash) DO UPDATE SET used=used+1", (day,kind,key))
                 conn.execute("COMMIT")
-                return True, QUOTA_DAILY_LIMIT-max(counts)-1
+                return True, max(0, min(limites[k] - n for n, (k, _) in zip(counts, keys)) - 1)
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
+
+def _quota_refund(ip, device_id):
+    """Devuelve la consulta cuando la petición falló (422/503...): el usuario no recibió resultado."""
+    day = datetime.datetime.now(QUOTA_TIMEZONE).strftime("%Y-%m-%d")
+    keys = [("ip", _quota_hash("ip:" + ip)), ("device", _quota_hash("device-quota:" + device_id))]
+    try:
+        with QUOTA_LOCK:
+            with sqlite3.connect(QUOTA_DB_PATH, timeout=15) as conn:
+                for kind, key in keys:
+                    conn.execute("UPDATE daily_quota SET used=MAX(0,used-1) WHERE day=? AND kind=? AND key_hash=?", (day, kind, key))
+                conn.commit()
+    except Exception as exc:
+        print(f"⚠️ No se pudo devolver la cuota: {type(exc).__name__}")
+
 
 def _quota_continue_token(img_bytes, ip, device):
     expiry = int(time.time()) + 900
@@ -246,9 +263,12 @@ async def proteger_cuotas(request: Request, call_next):
         # Fail closed: nunca permitir consultas costosas sin registrar la cuota.
         return JSONResponse(status_code=503, content={"detail":"El control de consultas no está disponible. Revisa la consola del servidor."})
     if not permitido:
-        response = JSONResponse(status_code=429, content={"detail":"Has alcanzado el límite de 3 consultas gratuitas de hoy. Vuelve mañana."})
+        response = JSONResponse(status_code=429, content={"detail":f"Has alcanzado el límite de {QUOTA_DAILY_LIMIT} consultas gratuitas de hoy. Vuelve mañana."})
     else:
         response = await call_next(request)
+        if response.status_code >= 400:
+            _quota_refund(_quota_ip(request), ident)
+            restantes += 1
     response.headers["X-Plantorum-Quota-Remaining"] = str(restantes)
     if fresh:
         response.set_cookie(QUOTA_COOKIE, raw, max_age=365*86400, httponly=True, secure=request.url.scheme=="https", samesite="lax", path="/")
@@ -312,6 +332,7 @@ NOMBRES_COMUNES = {
     "coffea arabica": "Cafeto",
     "musa": "Platanera",
     "rosa": "Rosal",
+    "dionaea muscipula": "Venus atrapamoscas",
     "trachelospermum jasminoides": "Falso jazmín / Jazmín estrella",
     "jasminum": "Jazmín",
     "chassalia corallioides": "Arbusto coral",
@@ -552,14 +573,14 @@ def identificar_local(img, top_k=3):
 
 def identificar_plantnet(img_bytes):
     if not PLANTNET_KEY:
-        print("⚠️ PLANTNET_API_KEY no configurada")
+        print("⚠️ [PLANTNET V103] sin clave configurada: se activará respaldo")
         return []
     try:
         r = _post_medido("Pl@ntNet identificación",
             "https://my-api.plantnet.org/v2/identify/all",
             params={"api-key": PLANTNET_KEY, "lang": "es"},
             files={"images": ("foto.jpg", img_bytes, "image/jpeg")},
-            timeout=8,  # ← CAMBIAR AQUÍ (estaba en 30)
+            timeout=float(os.getenv("PLANTNET_TIMEOUT", "8")),
         )
         r.raise_for_status()
         out = []
@@ -575,10 +596,13 @@ def identificar_plantnet(img_bytes):
                 "nombre_comun": comun,
                 "confianza": round(float(res.get("score", 0)), 3),
             })
-        print(f"🌿 Pl@ntNet: {out[0]['nombre_comun'] if out else 'sin resultados'} ({out[0]['confianza'] if out else 0})")
+        if out:
+            print(f"🌿 [PLANTNET V103] especie={out[0]['nombre_cientifico']!r} | común={out[0]['nombre_comun']!r} | confianza={out[0]['confianza']:.3f} | candidatos={len(out)}")
+        else:
+            print("🌿 [PLANTNET V103] sin especies válidas en la respuesta")
         return out
     except Exception as e:
-        print(f"⚠️ Pl@ntNet: {e}")
+        print(f"⚠️ [PLANTNET V103] fallo={type(e).__name__}: {e}")
         return []
 
 
@@ -874,6 +898,79 @@ def diagnostico_gemini(img, especie_contexto=None):
 
     print("⚠️ Ningún modelo de Gemini funcionó")
     return None
+
+
+def diagnostico_gemini_unificado(img, limite=None):
+    """Una petición Gemini por modelo: validación estricta + diagnóstico.
+
+    Devuelve ("ok", diagnóstico), ("no_planta", None) o
+    ("indeterminado", None). Nunca interpreta errores como plantas.
+    """
+    if not GEMINI_KEY:
+        return "error", None
+
+    prompt = PROMPT_DIAGNOSTICO.format(contexto="") + """
+
+CONTROL BOTÁNICO OBLIGATORIO, EN ESTA MISMA RESPUESTA:
+Añade al JSON los campos:
+"es_planta": true o false,
+"confianza_planta": número entre 0 y 1,
+"sujeto_principal": "planta", "persona", "vehículo", "animal", "objeto" u "otro",
+"evidencia_vegetal": "hojas/tallos/flores reales visibles" o "ninguna".
+
+Antes de diagnosticar comprueba visualmente el sujeto principal.
+- Si NO es una planta REAL como sujeto principal, devuelve SOLAMENTE:
+  {"es_planta":false,"confianza_planta":1.0,"sujeto_principal":"objeto",
+   "evidencia_vegetal":"ninguna"}. Adapta sujeto_principal al objeto real.
+- Si no puedes determinarlo con seguridad, devuelve:
+  {"es_planta":false,"confianza_planta":0.0,"sujeto_principal":"otro",
+   "evidencia_vegetal":"ninguna"}.
+- Si es una planta real como sujeto principal, devuelve es_planta=true,
+  sujeto_principal="planta", confianza_planta >= 0.70 cuando estés razonablemente seguro,
+  evidencia_vegetal describiendo estructuras realmente visibles,
+  y TODOS los campos de diagnóstico y guía indicados anteriormente.
+- No confundas personas, coches, animales, ilustraciones, plantas artificiales
+  ni vegetación secundaria de fondo con una planta real como sujeto principal.
+- No inventes evidencia ni síntomas. Devuelve SOLO un objeto JSON válido.
+"""
+    img_b64 = base64.b64encode(imagen_a_jpeg_bytes(img, max_px=1024)).decode("utf-8")
+    for modelo in MODELOS_GEMINI:
+        if limite is not None and time.monotonic() > limite:
+            print("⏱️ [V105] Plazo agotado: no se prueban más modelos")
+            break
+        texto = _pedir_texto_gemini(modelo, prompt, img_b64, forzar_json=True, tipo="DIAGNOSTICO_UNIFICADO_V105")
+        if not texto or texto == "no_modelo":
+            continue
+        try:
+            data = extraer_json(texto)
+            if not isinstance(data, dict) or type(data.get("es_planta")) is not bool:
+                print("⚠️ [V105] Respuesta sin es_planta booleano; no se autoriza diagnóstico")
+                continue
+            sujeto = str(data.get("sujeto_principal") or "").strip().lower()
+            evidencia = str(data.get("evidencia_vegetal") or "").strip().lower()
+            confianza = float(data.get("confianza_planta", 0))
+            if data["es_planta"] is False:
+                if confianza >= 0.85 and sujeto in {"persona", "vehículo", "vehiculo", "animal", "objeto", "otro"}:
+                    print(f"🚫 [V105] Imagen rechazada: sujeto={sujeto}")
+                    return "no_planta", None
+                print("⚠️ [V105] Imagen ambigua: no se autoriza diagnóstico")
+                return "indeterminado", None
+            evidencia_valida = bool(evidencia) and evidencia not in {
+                "ninguna", "no hay", "ninguna visible", "no se observa", "no hay evidencia"
+            }
+            campos_validos = (
+                str(data.get("estado") or "").lower() in {"saludable", "atencion", "atención", "critico", "crítico"}
+                and bool(str(data.get("diagnostico") or "").strip())
+                and isinstance(data.get("guia"), dict)
+            )
+            if not (sujeto == "planta" and confianza >= 0.70 and evidencia_valida and campos_validos):
+                print(f"⚠️ [V105] Evidencia o diagnóstico insuficiente: sujeto={sujeto}, confianza={confianza}")
+                return "indeterminado", None
+            print(f"✅ [V105] Validación y diagnóstico en una consulta con {modelo}")
+            return "ok", construir_resultado(data, None, modelo)
+        except (ValueError, TypeError, AttributeError) as exc:
+            print(f"⚠️ [V105] Respuesta inválida: {type(exc).__name__}: {exc}")
+    return "error", None      # ningún modelo dio una respuesta utilizable (caída, cuota, JSON roto)
 
 
 # ============================================================
@@ -1236,20 +1333,45 @@ async def identificar_solo(request: Request, imagen: UploadFile = File(...)):
     photo_bytes = await imagen.read()
     await imagen.seek(0)
     loop = asyncio.get_running_loop()
-    # Pl@ntNet primero: evita dos llamadas a Gemini cuando la identificación es fiable.
-    try:
+    inicio_identificacion = time.perf_counter()
+    tiempos = {}
+    # El navegador ya comprime las fotos a JPEG <= 1024 px. Evitamos volver
+    # a codificarlas con Pillow cuando ya tienen ese formato y tamaño.
+    inicio_preparacion = time.perf_counter()
+    if (img.format == "JPEG" and max(img.size) <= 1024
+            and photo_bytes[:3] == b"\xff\xd8\xff"):
+        jpeg = photo_bytes
+    else:
         jpeg = imagen_a_jpeg_bytes(img, max_px=1024)
-        candidatos = await asyncio.wait_for(loop.run_in_executor(EXECUTOR, identificar_plantnet, jpeg), timeout=12.0)
+    tiempos["preparacion"] = time.perf_counter() - inicio_preparacion
+    # Pl@ntNet primero: una petición y sin llamadas a Gemini si hay confianza.
+    inicio_plantnet = time.perf_counter()
+    try:
+        candidatos = await asyncio.wait_for(loop.run_in_executor(EXECUTOR, identificar_plantnet, jpeg), timeout=float(os.getenv("PLANTNET_TIMEOUT", "8")) + 2)
     except Exception as exc:
-        print(f"⚠️ Pl@ntNet identificación: {exc}")
+        print(f"⚠️ Pl@ntNet identificación: {type(exc).__name__}: {exc}")
         candidatos = []
+    tiempos["plantnet"] = time.perf_counter() - inicio_plantnet
     resultado = None
     if candidatos and candidatos[0].get('confianza', 0) >= 0.40 and candidatos[0].get('nombre_cientifico'):
         resultado = candidatos[0]
+    # Auditoría: registrar por qué se descarta Pl@ntNet sin alterar el umbral.
+    if resultado is not None:
+        print(f"🎯 [PLANTNET V103] decisión=aceptado | confianza={resultado['confianza']:.3f} | umbral=0.400 | tiempo={tiempos['plantnet']:.2f}s")
+    else:
+        if not candidatos:
+            motivo = "sin candidatos válidos (o petición fallida; revisar línea anterior)"
+        elif not candidatos[0].get('nombre_cientifico'):
+            motivo = "sin nombre científico"
+        else:
+            motivo = "confianza inferior al umbral"
+        confianza_pn = candidatos[0].get('confianza', 0) if candidatos else 0
+        print(f"🔄 [PLANTNET V103] decisión=respaldo | motivo={motivo} | confianza={confianza_pn:.3f} | umbral=0.400 | tiempo={tiempos['plantnet']:.2f}s")
     if resultado is None:
+        inicio_respaldo = time.perf_counter()
         # Gemini se usa solo cuando Pl@ntNet no ofrece un resultado suficientemente fiable.
         try:
-            validacion = await asyncio.wait_for(loop.run_in_executor(EXECUTOR, detectar_si_es_planta, img), timeout=12.0)
+            validacion = await asyncio.wait_for(loop.run_in_executor(EXECUTOR, detectar_si_es_planta, img), timeout=30.0)
         except Exception:
             validacion = None
         if validacion is False:
@@ -1260,60 +1382,75 @@ async def identificar_solo(request: Request, imagen: UploadFile = File(...)):
             resultado = await asyncio.wait_for(loop.run_in_executor(EXECUTOR, _identificar_solo_gemini, img), timeout=35.0)
         except Exception:
             resultado = None
+        tiempos["respaldo"] = time.perf_counter() - inicio_respaldo
     if not resultado:
+        print(f"⏱️ [IDENTIFICACIÓN] sin resultado; fases={tiempos}; total={time.perf_counter()-inicio_identificacion:.2f}s")
         raise HTTPException(503, "No se ha podido identificar la especie con suficiente confianza.")
-    # El token es de un solo uso y está ligado a foto, IP y dispositivo.
+    # Si Pl@ntNet no conoce el nombre común, sigue habiendo identificación
+    # científica. Nunca presentar una especie identificada como desconocida.
     resultado = dict(resultado)
+    resultado['nombre_comun'] = (resultado.get('nombre_comun')
+                                or nombre_comun_es(resultado.get('nombre_cientifico'))
+                                or resultado.get('nombre_cientifico') or 'Planta')
+    # El token es de un solo uso y está ligado a foto, IP y dispositivo.
     resultado['continuacion_salud'] = _quota_continue_token(photo_bytes, _quota_ip(request), _quota_device_id(request.cookies.get(QUOTA_COOKIE)) or getattr(request.state, 'quota_device_id', ''))
+    total = time.perf_counter() - inicio_identificacion
+    print(f"⏱️ [IDENTIFICACIÓN V102] fuente={'Pl@ntNet' if 'respaldo' not in tiempos else 'respaldo'} | preparación={tiempos['preparacion']:.3f}s | Pl@ntNet={tiempos['plantnet']:.2f}s | respaldo={tiempos.get('respaldo', 0):.2f}s | total={total:.2f}s")
     return resultado
 
 @app.post("/analizar")
 async def analizar(request: Request, imagen: UploadFile = File(...)):
     img = await leer_imagen_validada(imagen)
-    # Validar contenido antes de invocar el diagnóstico (evita coches -> 'olivo sano').
+    # V105: si hay continuación validada, mantener la ruta anterior.
+    # Si es acceso directo, la validación se hace DENTRO de la petición
+    # de diagnóstico, evitando una segunda consulta a Gemini.
+    prevalidada = bool(getattr(request.state, 'plantorum_prevalidated', False))
     loop = asyncio.get_running_loop()
-    try:
-        es_planta = True if getattr(request.state, 'plantorum_prevalidated', False) else await asyncio.wait_for(
-            loop.run_in_executor(EXECUTOR, detectar_si_es_planta, img),
-            timeout=12.0
-        )
-    except Exception as e:
-        print(f"⚠️ No se pudo validar si es planta: {e}")
-        es_planta = None
-
-    if es_planta is False:
-        raise HTTPException(
-            status_code=422,
-            detail="No hemos detectado una planta con suficiente seguridad. Haz una foto de una planta real, sus hojas o sus flores e inténtalo de nuevo."
-        )
-    if es_planta is None:
-        # Fallar de forma segura: no emitir diagnósticos cuando no se ha podido validar la imagen.
-        raise HTTPException(
-            status_code=503,
-            detail="Ahora mismo no podemos comprobar si la foto contiene una planta. Inténtalo de nuevo en unos momentos."
-        )
+    ia_gemini = None
+    sin_validar = False       # Gemini no respondió: hay que confirmar con Pl@ntNet/local que es una planta
+    if not prevalidada:
+        inicio_unificado = time.perf_counter()
+        try:
+            estado_unificado, ia_gemini = await asyncio.wait_for(
+                loop.run_in_executor(EXECUTOR, diagnostico_gemini_unificado, img, time.monotonic() + 30.0),
+                timeout=35.0
+            )
+        except asyncio.TimeoutError:
+            print("⚠️ [V105] Diagnóstico unificado agotó 35s")
+            estado_unificado = "error"
+        except Exception as exc:
+            print(f"⚠️ [V105] Fallo en diagnóstico unificado: {type(exc).__name__}: {exc}")
+            estado_unificado = "error"
+        finally:
+            print(f"⏱️ [V105 DIAGNÓSTICO UNIFICADO] {time.perf_counter()-inicio_unificado:.2f}s")
+        if estado_unificado == "no_planta":
+            raise HTTPException(status_code=422, detail="No hemos detectado una planta real como sujeto principal. Haz una foto de una planta, sus hojas o sus flores.")
+        if estado_unificado == "error":
+            sin_validar = True          # → Plan B (Qwen) / Plan C (local), tras confirmar que es una planta
+            ia_gemini = None
+        elif estado_unificado != "ok" or not ia_gemini:
+            raise HTTPException(status_code=503, detail="No hemos podido comprobar con suficiente seguridad que la foto sea una planta. Haz otra foto más cercana de las hojas e inténtalo de nuevo.")
     # Contamos solo peticiones con imagen válida, no cargas malformadas.
     _stats_contar("escaneos")
     img_bytes_jpeg = imagen_a_jpeg_bytes(img, max_px=1024)
     loop = asyncio.get_running_loop()
 
-    # -------------------------------------------------------------
-    # 1. PLAN A: Consultar directamente a Gemini (hasta 35s para los modelos en cascada)
-    # -------------------------------------------------------------
-    ia_gemini = None
-    inicio_plan_a = time.perf_counter()
-    try:
-        print("Plan A: Consultando a Gemini...")
-        ia_gemini = await asyncio.wait_for(
-            loop.run_in_executor(EXECUTOR, diagnostico_gemini, img, None),
-            timeout=35.0
-        )
-    except asyncio.TimeoutError:
-        print("⏱️ Gemini superó el tiempo límite (35s). Pasando al Plan B...")
-    except Exception as e:
-        print(f"⚠️ Error consultando Gemini: {e}. Pasando al Plan B...")
-    finally:
-        print(f"⏱️ [Plan A Gemini] {time.perf_counter() - inicio_plan_a:.2f} s (tiempo observado por el endpoint)")
+    # Plan A para continuación ya validada; el acceso directo
+    # reutiliza el diagnóstico obtenido en la única llamada anterior.
+    if prevalidada:
+        inicio_plan_a = time.perf_counter()
+        try:
+            print("Plan A: Consultando a Gemini (imagen ya validada)...")
+            ia_gemini = await asyncio.wait_for(
+                loop.run_in_executor(EXECUTOR, diagnostico_gemini, img, None),
+                timeout=35.0
+            )
+        except asyncio.TimeoutError:
+            print("⏱️ Gemini superó el tiempo límite (35s). Pasando al Plan B...")
+        except Exception as e:
+            print(f"⚠️ Error consultando Gemini: {e}. Pasando al Plan B...")
+        finally:
+            print(f"⏱️ [Plan A Gemini] {time.perf_counter()-inicio_plan_a:.2f} s (tiempo observado por el endpoint)")
 
     if ia_gemini and not MODO_PRUEBA_QWEN:
         fuente_ia = "gemini"
@@ -1373,6 +1510,13 @@ async def analizar(request: Request, imagen: UploadFile = File(...)):
     except Exception as e:
         print(f"Error en identificación Plan B: {e}")
         plantnet, local = [], []
+
+    if sin_validar:
+        # Sin Gemini no hay validación fiable: exigimos una identificación mínima antes de diagnosticar.
+        pn_ok = bool(plantnet and plantnet[0].get("confianza", 0) >= 0.20)
+        lo_ok = bool(local and local[0].get("confianza", 0) >= 0.60)
+        if not (pn_ok or lo_ok):
+            raise HTTPException(status_code=503, detail="Ahora mismo no podemos analizar la foto. Inténtalo de nuevo en unos minutos.")
 
     fuente_usada, textos_perfil = elegir_especie(plantnet, local)
     cultivo = detectar_cultivo(plantnet, local)
@@ -1452,6 +1596,12 @@ async def analizar(request: Request, imagen: UploadFile = File(...)):
     # -------------------------------------------------------------
     print("Plan C: Usando modelo local de emergencia...")
     salud = analizar_salud_local(img, cultivo=cultivo, perfil=perfil)
+    if isinstance(salud, dict) and salud.get("estado") == "saludable":
+        # Sin IA no se puede afirmar que la planta esté sana.
+        salud["estado"] = "atencion"
+        salud["diagnostico"] = "Resultado no concluyente (análisis básico sin IA). " + (salud.get("diagnostico") or "")
+        if isinstance(salud.get("puntuacion"), (int, float)):
+            salud["puntuacion"] = min(int(salud["puntuacion"]), 75)
     return {
         "especie": {"fuente": fuente_usada, "plantnet": plantnet, "local": local},
         "salud": salud,
@@ -1693,4 +1843,7 @@ def raiz():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    # Detrás de un proxy (Render, Heroku, Nginx) la IP real llega en X-Forwarded-For; sin esto todos los usuarios
+    # compartirían la IP del proxy y el límite por IP los bloquearía a la vez.
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", "8000")), reload=False,
+                proxy_headers=True, forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"))

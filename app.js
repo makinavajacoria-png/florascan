@@ -3,7 +3,7 @@
 // ==========================================
 const DB = {
   dbName: 'PlantorumDB',
-  dbVersion: 1,
+  dbVersion: 2,
   storeName: 'fotos',
 
   async open() {
@@ -15,6 +15,10 @@ const DB = {
         const db = e.target.result;
         if (!db.objectStoreNames.contains(this.storeName)) {
           db.createObjectStore(this.storeName);
+        }
+        // v107: almacén independiente. No toca las fotos de Mi Jardín.
+        if (!db.objectStoreNames.contains('historial')) {
+          db.createObjectStore('historial', {keyPath:'id'});
         }
       };
     });
@@ -76,6 +80,141 @@ const DB = {
     } catch (e) {}
   }
 };
+// ==========================================
+// PLANTORUM V107 — HISTORIAL LOCAL (IndexedDB)
+// ==========================================
+// Los registros incluyen la foto JPEG ya comprimida y la respuesta real de
+// identificación/diagnóstico. Leerlos jamás llama a /identificar o /analizar.
+const PT_HIST={
+  async transaccion(tipo,trabajo){
+    const db=await DB.open();
+    try{
+      return await new Promise((resolve,reject)=>{
+        const tx=db.transaction('historial',tipo);
+        const store=tx.objectStore('historial');
+        let resultado;
+        try{resultado=trabajo(store,tx);}catch(e){reject(e);return;}
+        tx.oncomplete=()=>resolve(resultado);
+        tx.onerror=()=>reject(tx.error||new Error('Error al acceder al historial'));
+        tx.onabort=()=>reject(tx.error||new Error('Operación cancelada'));
+      });
+    }finally{db.close();}
+  },
+  async listar(){return this.transaccion('readonly',store=>{
+    const req=store.getAll();
+    const out={resultado:[]};
+    req.onsuccess=()=>{out.resultado=req.result||[];};
+    // La transacción terminará después de la lectura.
+    return out;
+  }).then(o=>o.resultado);},
+  async obtener(id){return this.transaccion('readonly',store=>{
+    const out={resultado:null};
+    const req=store.get(id);req.onsuccess=()=>{out.resultado=req.result||null;};
+    return out;
+  }).then(o=>o.resultado);},
+  async guardar(obj){return this.transaccion('readwrite',store=>{store.put(obj);return true;});},
+  async eliminar(id){return this.transaccion('readwrite',store=>{store.delete(id);return true;});},
+  async vaciar(){return this.transaccion('readwrite',store=>{store.clear();return true;});}
+};
+let ptHistorialDetalleActivo=null;
+let ptHistorialImagenUrl=null;
+let ptHistorialMiniaturas=[];
+function ptHistId(){return 'scan_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);}
+function ptHistLiberarMiniaturas(){ptHistorialMiniaturas.forEach(u=>URL.revokeObjectURL(u));ptHistorialMiniaturas=[];}
+function ptHistLiberarDetalle(){if(ptHistorialImagenUrl){URL.revokeObjectURL(ptHistorialImagenUrl);ptHistorialImagenUrl=null;}}
+async function ptHistGuardarIdentificacion(blob,d){
+  try{
+    const id=ptHistId(),ahora=Date.now();
+    await PT_HIST.guardar({id,fecha:ahora,actualizado:ahora,imagen:blob,
+      identificacion:{nombre:ptNombreIdentificado(d),cientifico:d.nombre_cientifico||'',confianza:typeof d.confianza==='number'?d.confianza:null},
+      diagnostico:null});
+    return id;
+  }catch(e){console.warn('[Plantorum historial] No se pudo guardar identificación:',e);mostrarToast('Aviso: no se pudo guardar esta identificación en el historial.');return null;}
+}
+async function ptHistGuardarSalud(blob,d,id=null,identificacion=null){
+  try{
+    const anterior=id?await PT_HIST.obtener(id):null;
+    const ahora=Date.now();
+    // La identificación de Pl@ntNet prevalece como etiqueta de la ficha
+    // cuando la consulta de salud completa el mismo escaneo.
+    const especie=datosEspecie(d);
+    const ident=anterior?.identificacion||identificacion||{nombre:especie.nom,cientifico:especie.cient,confianza:null};
+    const registro={id:anterior?.id||id||ptHistId(),fecha:anterior?.fecha||ahora,
+      actualizado:ahora,imagen:anterior?.imagen||blob,
+      identificacion:ident,diagnostico:d};
+    await PT_HIST.guardar(registro);
+    return registro.id;
+  }catch(e){console.warn('[Plantorum historial] No se pudo guardar diagnóstico:',e);mostrarToast('Aviso: el diagnóstico se ve, pero no se ha podido guardar en el historial.');return null;}
+}
+async function ptHistPintar(){
+  const lista=$('ptHistLista');if(!lista)return;
+  ptHistLiberarMiniaturas();lista.replaceChildren();
+  try{
+    const registros=(await PT_HIST.listar()).sort((a,b)=>b.actualizado-a.actualizado);
+    if($('ptHistNumero'))$('ptHistNumero').textContent=registros.length+' '+(registros.length===1?'escaneo guardado':'escaneos guardados');
+    if(!registros.length){
+      const vacio=document.createElement('div');vacio.className='pt-hist-vacio';
+      vacio.textContent='Todavía no hay escaneos. Identifica una planta o analiza su salud y aparecerá aquí automáticamente.';
+      lista.append(vacio);return;
+    }
+    for(const r of registros){
+      const card=document.createElement('article');card.className='pt-hist-card';
+      const abrir=document.createElement('button');abrir.type='button';abrir.className='pt-hist-abrir';
+      abrir.setAttribute('aria-label','Ver escaneo de '+(r.identificacion?.nombre||'planta'));
+      abrir.addEventListener('click',()=>ptHistAbrir(r.id));
+      const foto=document.createElement('div');foto.className='pt-hist-thumb';
+      if(r.imagen instanceof Blob){const img=document.createElement('img');const url=URL.createObjectURL(r.imagen);ptHistorialMiniaturas.push(url);img.src=url;img.alt='Fotografía de '+(r.identificacion?.nombre||'planta');img.loading='lazy';foto.append(img);}
+      else foto.textContent='🌿';
+      const cuerpo=document.createElement('div');cuerpo.className='pt-hist-card-copy';
+      const titulo=document.createElement('strong');titulo.textContent=r.identificacion?.nombre||'Planta identificada';
+      const cient=document.createElement('small');cient.textContent=r.identificacion?.cientifico||'';
+      const tipo=document.createElement('span');tipo.className='pt-hist-tipo';
+      const salud=r.diagnostico?.salud;
+      tipo.textContent=salud?'Identificación + salud · '+(salud.estado==='saludable'?'Saludable':salud.estado==='atencion'?'Atención':'Revisar diagnóstico'):'Solo identificación · Sin análisis de salud';
+      const fecha=document.createElement('time');fecha.dateTime=new Date(r.fecha).toISOString();
+      fecha.textContent=new Date(r.fecha).toLocaleString('es-ES',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+      cuerpo.append(titulo,cient,tipo,fecha);abrir.append(foto,cuerpo);
+      const borrar=document.createElement('button');borrar.type='button';borrar.className='pt-hist-borrar';borrar.textContent='Eliminar';
+      borrar.setAttribute('aria-label','Eliminar escaneo de '+(r.identificacion?.nombre||'planta'));
+      borrar.addEventListener('click',()=>ptHistEliminar(r.id));
+      card.append(abrir,borrar);lista.append(card);
+    }
+  }catch(e){console.error('[Plantorum historial] Error leyendo:',e);lista.textContent='No se pudo abrir el historial de este dispositivo.';}
+}
+async function ptHistAbrir(id){
+  try{
+    const r=await PT_HIST.obtener(id);if(!r)return mostrarToast('Este escaneo ya no está disponible.');
+    ptHistLiberarDetalle();ptHistorialDetalleActivo=r.id;
+    if(r.imagen instanceof Blob)ptHistorialImagenUrl=URL.createObjectURL(r.imagen);
+    if(r.diagnostico){
+      ultimoBlob=r.imagen;
+      bloqueoActivo=false;
+      show('resultado');
+      $('resFoto').src=ptHistorialImagenUrl||'';
+      pintar(r.diagnostico);
+      // Respeta el nombre obtenido al identificar, si es el mismo escaneo.
+      if(r.identificacion?.nombre)$('resNombre').textContent=r.identificacion.nombre;
+      if(r.identificacion?.cientifico)$('resComun').textContent=r.identificacion.cientifico;
+      const boton=$('btnAddJardin');if(boton)boton.style.display='none';
+      const volverBoton=document.querySelector('#s-resultado .btn-back');if(volverBoton)volverBoton.textContent='← Historial';
+    }else{
+      show('historial-detalle');
+      $('ptHistDetalleFoto').src=ptHistorialImagenUrl||'';
+      $('ptHistDetalleNombre').textContent=r.identificacion?.nombre||'Planta identificada';
+      $('ptHistDetalleCientifico').textContent=r.identificacion?.cientifico||'';
+      $('ptHistDetalleConfianza').textContent=typeof r.identificacion?.confianza==='number'?'Confianza estimada: '+Math.round(r.identificacion.confianza*100)+' %':'';
+      $('ptHistDetalleFecha').textContent=new Date(r.fecha).toLocaleString('es-ES');
+    }
+  }catch(e){console.error('[Plantorum historial] No se pudo abrir:',e);mostrarToast('No se pudo abrir este escaneo guardado.');}
+}
+async function ptHistEliminar(id){
+  if(!confirm('¿Eliminar este escaneo del historial? No afectará a Mi Jardín.'))return;
+  try{await PT_HIST.eliminar(id);await ptHistPintar();}catch(e){mostrarToast('No se pudo eliminar este escaneo.');}
+}
+async function ptHistVaciar(){
+  if(!confirm('¿Eliminar todo el historial? Las plantas de Mi Jardín no se borrarán.'))return;
+  try{await PT_HIST.vaciar();await ptHistPintar();}catch(e){mostrarToast('No se pudo vaciar el historial.');}
+}
 let spTimer=null,spIntentos=0;
 const LS={get(k,d){try{const v=JSON.parse(localStorage.getItem('fs_'+k));return v==null?d:v}catch(e){return d}},set(k,v){localStorage.setItem('fs_'+k,JSON.stringify(v))}};
 let stream=null,volverA='jardin',zoomTrack=null,ultimoBlob=null,tabActual='cuidados',datosActuales=null,planElegido='anual';
@@ -123,6 +262,7 @@ function show(n, guardarHistorial = true) {
   // Refrescar contenido según la vista
   if (n === 'jardin') { pintarJardin(); setTimeout(comprobarAvisosRiego, 350); }
   if (n === 'guia') pintarGuias();
+  if (n === 'historial') void ptHistPintar();
   window.scrollTo(0, 0);
 
   // Integración con el historial del navegador/Android
@@ -166,9 +306,10 @@ function restaurar(){mostrarToast(tier()==='free'?'No hay compras anteriores.':'
 function limpiarCache(){if(confirm('¿Borrar la caché de fotos de la guía?')){Object.keys(localStorage).filter(k=>k.startsWith('fs_wg_')).forEach(k=>localStorage.removeItem(k));location.reload();}}
 // BORRAR TODO (Ajustes)
 async function borrarTodo() {
-  if (confirm('¿Eliminar TODOS tus datos (jardín, suscripción y ajustes)? Esta acción no se puede deshacer.')) {
+  if (confirm('¿Eliminar TODOS tus datos (jardín, historial, suscripción y ajustes)? Esta acción no se puede deshacer.')) {
     Object.keys(localStorage).filter(k => k.startsWith('fs_')).forEach(k => localStorage.removeItem(k));
     await DB.borrarTodo(); // Limpiar la base de datos de fotos completa
+    await PT_HIST.vaciar(); // Eliminar también las consultas del historial
     location.reload();
   }
 }
@@ -178,7 +319,7 @@ const copia=limpiarInterno(JSON.parse(JSON.stringify(p)));
 const b=new Blob([JSON.stringify(copia,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='plantorum_jardin.json';document.body.appendChild(a);a.click();document.body.removeChild(a);}
 function abrirLegal(t){$('legalTitulo').textContent=t==='priv'?'Política de privacidad':'Términos de uso';$('legalTexto').innerHTML=t==='priv'?LEGAL_PRIV:LEGAL_TERMS;$('modalLegal').classList.add('on');ptOverlayOpen('modalLegal');}
 function cerrarLegal(){$('modalLegal').classList.remove('on');ptOverlayClose('modalLegal');}
-const LEGAL_PRIV='<p>Plantorum procesa las fotos que subes únicamente para identificar la especie y generar el diagnóstico. Las imágenes se procesan mediante los servicios necesarios para la identificación y el análisis, y no se almacenan en nuestros servidores.</p><p>Tu jardín, recordatorios y ajustes se guardan localmente en tu dispositivo. Puedes exportarlos o eliminarlos definitivamente desde Ajustes en cualquier momento (derechos RGPD).</p><p>No compartimos datos personales con terceros ni los usamos con fines publicitarios.</p>';
+const LEGAL_PRIV='<p>Plantorum procesa las fotos que subes únicamente para identificar la especie y generar el diagnóstico. Las imágenes se procesan mediante los servicios necesarios para la identificación y el análisis, y no se almacenan en nuestros servidores.</p><p>Tu jardín, historial, recordatorios y ajustes se guardan localmente en tu dispositivo. Puedes exportarlos o eliminarlos definitivamente desde Ajustes en cualquier momento (derechos RGPD).</p><p>No compartimos datos personales con terceros ni los usamos con fines publicitarios.</p>';
 const LEGAL_TERMS='<p>Plantorum ofrece información orientativa sobre identificación y cuidados de plantas. No sustituye el asesoramiento de un profesional de la jardinería o la fitosanidad.</p><p>Los planes Premium mostrados son una demostración de diseño. No se realizan cobros reales desde esta versión.</p><p>El uso de la app implica la aceptación de estas condiciones y de la política de privacidad.</p>';
 function claveUsoDiario(){
   const ahora = new Date();
@@ -218,11 +359,27 @@ async function abrirCamara(modo='diagnostico'){
     ptZoomDigital=1;video.style.transform='';
   }catch(e){cerrarCamara();mostrarToast(e?.name==='NotAllowedError'?'Permiso de cámara denegado. Actívalo en los ajustes del navegador.':'No se pudo abrir la cámara: '+(e.message||e));}
 }
-function cerrarCamara(){if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;zoomTrack=null;video.srcObject=null;video.style.transform='';$('cam').classList.remove('on');ptOverlayClose('cam')}
+function cerrarCamara(paraProcesarFoto=false){
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  stream=null;zoomTrack=null;video.srcObject=null;video.style.transform='';
+  $('cam').classList.remove('on');
+  if(paraProcesarFoto){
+    // Al pasar de la cámara al resultado NO hacer history.back():
+    // un popstate pendiente cerraba el diálogo recién abierto.
+    // Sustituimos la entrada de cámara por una entrada normal, sin modal.
+    if(history.state?.ptOverlay==='cam'){
+      const estado={...history.state};
+      delete estado.ptOverlay;
+      history.replaceState(estado,'',location.href);
+    }
+  }else{
+    ptOverlayClose('cam');
+  }
+}
 async function aplicarZoom(v){const n=Number(v);if(ptZoomNativo&&zoomTrack){try{await zoomTrack.applyConstraints({advanced:[{zoom:n}]});return}catch(e){ptZoomNativo=false;}}ptZoomDigital=n;video.style.transform='scale('+n+')';video.style.transformOrigin='center'}
 function ptFotoCanvas(){const c=document.createElement('canvas');const w=video.videoWidth,h=video.videoHeight;if(!w||!h)throw Error('La cámara todavía no está lista');c.width=w;c.height=h;const ctx=c.getContext('2d');if(!ptZoomNativo&&ptZoomDigital>1){const sw=w/ptZoomDigital,sh=h/ptZoomDigital;ctx.drawImage(video,(w-sw)/2,(h-sh)/2,sw,sh,0,0,w,h)}else ctx.drawImage(video,0,0);return c;}
-function capturar(){try{const c=ptFotoCanvas();const modo=ptModoFoto;cerrarCamara();c.toBlob(b=>{if(b)(modo==='identificar'?identificarSolamente(b):analizar(b));},'image/jpeg',0.85)}catch(e){mostrarToast(e.message)}}
-async function subir(ev){const f=ev.target.files?.[0];const modo=ptModoFoto;ev.target.value='';if(f){cerrarCamara();await (modo==='identificar'?identificarSolamente(f):analizar(f));}}
+function capturar(){try{const c=ptFotoCanvas();const modo=ptModoFoto;cerrarCamara(true);c.toBlob(b=>{if(b)(modo==='identificar'?identificarSolamente(b):analizar(b));},'image/jpeg',0.85)}catch(e){mostrarToast(e.message)}}
+async function subir(ev){const f=ev.target.files?.[0];const modo=ptModoFoto;ev.target.value='';if(f){cerrarCamara(true);await (modo==='identificar'?identificarSolamente(f):analizar(f));}}
 function iniciarModoIdentificacion(){return abrirCamara('identificar')}
 function abrirConsejos(){$('modalConsejos').classList.add('on');ptOverlayOpen('modalConsejos')}
 function cerrarConsejos(){$('modalConsejos').classList.remove('on');ptOverlayClose('modalConsejos')}
@@ -253,11 +410,14 @@ async function prepararBlob(b) {
   }
 }
 
-async function analizar(blobO,continuacion=null){
+async function analizar(blobO,continuacion=null,historialId=null,identificacionOriginal=null){
   if(!blobO) return;
   // La cuota se verifica en FastAPI, antes de consultar servicios externos.
   if(analisisEnCurso) return;
   analisisEnCurso = true;
+  ptHistorialDetalleActivo=null;ptHistLiberarDetalle();
+  const volverBoton=document.querySelector('#s-resultado .btn-back');if(volverBoton)volverBoton.textContent='← Volver';
+  const botonGuardar=$('btnAddJardin');if(botonGuardar)botonGuardar.style.display='';
   bloqueoActivo = false;
   const blob=continuacion?blobO:await prepararBlob(blobO);
   ultimoBlob=blob;
@@ -289,6 +449,7 @@ async function analizar(blobO,continuacion=null){
     const d=await r.json();
     // Cuota contabilizada en el servidor.
     pintar(d);
+    await ptHistGuardarSalud(blob,d,historialId,identificacionOriginal);
   }catch(e){
     $('resFotoWrap').classList.remove('scanning');
     $('resNombre').textContent='❌ Error';
@@ -545,7 +706,7 @@ async function verDetalle(id) {
       $('ptIdGuardar').disabled=true;$('ptIdGuardar').textContent='✓ Guardada en Mi Jardín';
       $('ptIdSalud').disabled=!foto;
       if(foto){const res=await fetch(foto);ptIdentificacionActual={blob:await res.blob(),guardada:true};}
-      $('ptIdentificacion').hidden=false;ptOverlayOpen('ptIdentificacion');return;
+      const modal=$('ptIdentificacion');modal.hidden=false;modal.style.setProperty('display','flex','important');modal.style.setProperty('visibility','visible','important');ptOverlayOpen('ptIdentificacion');return;
     }
     bloqueoActivo = (tier() === 'free' && !!p.locked);
     volverA = 'jardin';
@@ -814,6 +975,7 @@ async function compartirResultado() {
 
 // Función para volver atrás explícitamente al pulsar el botón "← Volver"
 function volver() {
+  if(ptHistorialDetalleActivo){ptHistorialDetalleActivo=null;ptHistLiberarDetalle();show('historial');return;}
   if (window.history.length > 1 && history.state && history.state.seccion === 'resultado') {
     history.back(); // Dispara el evento popstate de forma natural
   } else {
@@ -1003,26 +1165,41 @@ function comprobarAvisosRiego(){
   const firma=pendientes.map(p=>p.id+':'+p.data.recordatorio.proxima).join('|');
   if(sessionStorage.getItem('pt_riego_popup')!==firma){sessionStorage.setItem('pt_riego_popup',firma);mostrarToast('💧 Tienes '+pendientes.length+' planta(s) pendientes de revisar para el riego.');}
 }
-function cerrarIdentificacion(){$('ptIdentificacion').hidden=true;ptOverlayClose('ptIdentificacion');}
+function cerrarIdentificacion(){const m=$('ptIdentificacion');m.hidden=true;m.style.setProperty('display','none','important');ptOverlayClose('ptIdentificacion');}
 let ptIdentificacionActual=null;
+// Mostrar el nombre cientifico cuando un proveedor no disponga del nombre comun.
+// La especie sigue estando identificada aunque falte el nombre popular.
+function ptNombreIdentificado(d){
+  const comun=typeof d?.nombre_comun==='string'?d.nombre_comun.trim():'';
+  if(comun && comun!=='Planta sin identificar' && comun!=='Planta')return comun;
+  const cientifico=typeof d?.nombre_cientifico==='string'?d.nombre_cientifico.trim():'';
+  if(/^Dionaea\s+muscipula\b/i.test(cientifico))return 'Venus atrapamoscas';
+  return cientifico || comun || 'Planta sin identificar';
+}
 async function identificarSolamente(archivo){
   if(!archivo)return;
   // La cuota se verifica en FastAPI, antes de consultar servicios externos.
   ptIdentificacionActual=null;
   $('ptIdGuardar').disabled=true;$('ptIdGuardar').textContent='🌱 Guardar en Mi Jardín';$('ptIdSalud').disabled=true;
-  const modal=$('ptIdentificacion');modal.hidden=false;ptOverlayOpen('ptIdentificacion');
+  const modal=$('ptIdentificacion');modal.hidden=false;modal.style.setProperty('display','flex','important');modal.style.setProperty('visibility','visible','important');ptOverlayOpen('ptIdentificacion');
   $('ptIdNombre').textContent='Identificando...';$('ptIdCientifico').textContent='';$('ptIdConfianza').textContent='';$('ptIdError').textContent='';
+  const inicioCliente=performance.now();
   const comprimida=await prepararBlob(archivo);
+  const msPreparacion=Math.round(performance.now()-inicioCliente);
   const url=URL.createObjectURL(comprimida);$('ptIdFoto').src=url;
   const fd=new FormData();fd.append('imagen',comprimida,'planta.jpg');
   try{
+    const inicioRed=performance.now();
     const r=await fetch('/identificar',{method:'POST',body:fd});
+    console.info('[Plantorum rendimiento] foto='+Math.round(comprimida.size/1024)+' KB, preparación='+msPreparacion+' ms, servidor/red='+Math.round(performance.now()-inicioRed)+' ms');
     let d;try{d=await r.json();}catch(e){throw Error('El servidor no ha devuelto una respuesta válida (HTTP '+r.status+').');}
     if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:'No se pudo identificar la planta (HTTP '+r.status+').');
     // Cuota contabilizada en el servidor.
-    ptIdentificacionActual={blob:comprimida,nombre:d.nombre_comun||'Planta sin identificar',cientifico:d.nombre_cientifico||'',confianza:typeof d.confianza==='number'?d.confianza:null,continuacion:d.continuacion_salud||null,guardada:false};
+    const nombrePresentado=ptNombreIdentificado(d);
+    const historialId=await ptHistGuardarIdentificacion(comprimida,d);
+    ptIdentificacionActual={blob:comprimida,nombre:nombrePresentado,cientifico:d.nombre_cientifico||'',confianza:typeof d.confianza==='number'?d.confianza:null,continuacion:d.continuacion_salud||null,guardada:false,historialId};
     $('ptIdGuardar').disabled=false;$('ptIdSalud').disabled=false;
-    $('ptIdNombre').textContent=d.nombre_comun||'Planta sin identificar';
+    $('ptIdNombre').textContent=nombrePresentado;
     $('ptIdCientifico').textContent=d.nombre_cientifico||'';
     $('ptIdConfianza').textContent=typeof d.confianza==='number'?'Confianza estimada: '+Math.round(d.confianza*100)+' %':'';
   }catch(e){$('ptIdNombre').textContent='No se pudo identificar';$('ptIdError').textContent=e.message;}
@@ -1108,9 +1285,18 @@ async function guardarIdentificacionJardin(){
 function analizarSaludIdentificada(){
   const x=ptIdentificacionActual;
   if(!x?.blob)return;
-  // Se realiza una consulta adicional a /analizar; consume otro escaneo.
-  // Inicio directo: analizar() mantiene la comprobación del límite de escaneos.
-  cerrarIdentificacion();ptModoFoto='diagnostico';analizar(x.blob,x.continuacion);
+  // Transición atómica: no llamar a cerrarIdentificacion(), que ejecuta
+  // history.back() y puede devolver la app a Mi Jardín durante el diagnóstico.
+  const modal=$('ptIdentificacion');
+  modal.hidden=true;
+  modal.style.setProperty('display','none','important');
+  // Quitar la marca del modal sin disparar popstate; analizar() navegará a resultado.
+  if(history.state?.ptOverlay==='ptIdentificacion'){
+    const estado={...history.state};delete estado.ptOverlay;
+    history.replaceState(estado,'',location.href);
+  }
+  ptModoFoto='diagnostico';
+  analizar(x.blob,x.continuacion,x.historialId,{nombre:x.nombre,cientifico:x.cientifico,confianza:x.confianza});
 }
 
 // Plantorum v97: personalización local sin registro ni datos enviados al servidor.
