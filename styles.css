@@ -1059,3 +1059,67 @@ body,.app,.sc.grad{background:#F8F7EF}
   #s-jardin .pt-home-actions .pt-home-mini b{font-size:17px}
 }
 @media(prefers-reduced-motion:reduce){#s-jardin .pt-home-actions button{transition:none}}
+
+/* Plantorum 109: menos movimiento cuando el usuario lo solicita. */
+@media (prefers-reduced-motion: reduce) {
+  *,*::before,*::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
+}
+
+/* ================================================================
+   Plantorum v110.1 — Secuencia visual de diagnóstico de salud
+   Solo interviene cuando #resFotoWrap tiene clase .scanning.
+   ================================================================ */
+#s-resultado .res-foto-wrap.scanning::before{
+  content:"";position:absolute;inset:0;z-index:4;pointer-events:none;
+  background:linear-gradient(180deg,rgba(5,35,27,.18),rgba(5,34,27,.71));
+}
+#s-resultado .res-foto-wrap.scanning .scan-text{
+  position:absolute;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:9px;text-align:center;
+  top:50%;left:50%;bottom:auto;width:calc(100% - 28px);max-width:350px;
+  padding:19px 13px 18px;transform:translate(-50%,-50%);
+  border:1px solid rgba(255,255,255,.24);border-radius:19px;
+  background:rgba(9,49,36,.79);backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);
+  box-shadow:0 12px 30px rgba(0,0,0,.2);white-space:normal;
+  color:#fff;z-index:6;
+}
+#s-resultado .scan-text #ptSaludProgresoTitulo{
+  color:#fff;font-size:clamp(17px,4.7vw,21px);font-weight:750;
+  line-height:1.24;letter-spacing:-.2px;text-wrap:balance;
+}
+#s-resultado .scan-text #ptSaludProgresoSubtitulo{
+  color:#E7F4EA;font-size:13px;font-weight:450;line-height:1.45;
+}
+#s-resultado .pt-salud-pulso{
+  width:29px;height:29px;border:2px solid rgba(192,245,205,.4);
+  border-top-color:#C2F5CF;border-radius:50%;
+  animation:ptSaludGiro 1.5s linear infinite;
+}
+#s-resultado .pt-salud-indicador{display:flex;gap:7px;margin-top:4px}
+#s-resultado .pt-salud-indicador i{
+  width:7px;height:7px;border-radius:50%;background:#B5F0C7;
+  animation:ptSaludPunto 1.2s ease-in-out infinite;
+}
+#s-resultado .pt-salud-indicador i:nth-child(2){animation-delay:.15s}
+#s-resultado .pt-salud-indicador i:nth-child(3){animation-delay:.3s}
+#s-resultado .res-foto-wrap.pt-salud-completado .scan-line,
+#s-resultado .res-foto-wrap.pt-salud-completado .pt-salud-indicador{display:none}
+#s-resultado .res-foto-wrap.pt-salud-completado .pt-salud-pulso{
+  border:0;animation:none;width:34px;height:34px;
+}
+#s-resultado .res-foto-wrap.pt-salud-completado .pt-salud-pulso::before{
+  content:"✓";display:grid;place-items:center;width:34px;height:34px;
+  background:#C2F5CF;color:#0F4D3A;border-radius:50%;font-size:23px;font-weight:800;
+}
+@keyframes ptSaludGiro{to{transform:rotate(360deg)}}
+@keyframes ptSaludPunto{0%,65%,100%{opacity:.4;transform:translateY(0)}30%{opacity:1;transform:translateY(-4px)}}
+@media(prefers-reduced-motion:reduce){
+  #s-resultado .pt-salud-pulso,#s-resultado .pt-salud-indicador i,
+  #s-resultado .res-foto-wrap .scan-line{animation:none!important}
+}
+
+/* La ficha se revela solo al finalizar; nunca permitir guardar resultados incompletos. */
+#s-resultado.pt-salud-en-proceso .pt-result-eyebrow,
+#s-resultado.pt-salud-en-proceso .res-info,
+#s-resultado.pt-salud-en-proceso .res-card,
+#s-resultado.pt-salud-en-proceso .btn-add-jardin{display:none!important}

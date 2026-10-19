@@ -208,11 +208,11 @@ async function ptHistAbrir(id){
   }catch(e){console.error('[Plantorum historial] No se pudo abrir:',e);mostrarToast('No se pudo abrir este escaneo guardado.');}
 }
 async function ptHistEliminar(id){
-  if(!confirm('¿Eliminar este escaneo del historial? No afectará a Mi Jardín.'))return;
+  if(!await ptConfirmar('¿Eliminar este escaneo del historial? No afectará a Mi Jardín.'))return;
   try{await PT_HIST.eliminar(id);await ptHistPintar();}catch(e){mostrarToast('No se pudo eliminar este escaneo.');}
 }
 async function ptHistVaciar(){
-  if(!confirm('¿Eliminar todo el historial? Las plantas de Mi Jardín no se borrarán.'))return;
+  if(!await ptConfirmar('¿Eliminar todo el historial? Las plantas de Mi Jardín no se borrarán.'))return;
   try{await PT_HIST.vaciar();await ptHistPintar();}catch(e){mostrarToast('No se pudo vaciar el historial.');}
 }
 let spTimer=null,spIntentos=0;
@@ -278,35 +278,14 @@ function show(n, guardarHistorial = true) {
 function tier(){return LS.get('tier','free')}
 function actualizarTier(){$('estadoTier').textContent='Suscripción Estado: '+(tier()==='free'?'Gratis':(tier()==='pro'?'Pro (prueba)':'De por vida'))}
 
-function cerrarPaywall(){$('paywall').classList.remove('on')}
-function elegirPlan(p){
-  planElegido=p;
-  const a=$('planAnual'),m=$('planMensual'),l=$('planLifetime'),r=$('planRescate');
-  if(a)a.classList.toggle('sel',p==='anual');
-  if(m)m.classList.toggle('sel',p==='mensual');
-  if(l)l.classList.toggle('sel',p==='lifetime');
-  if(r)r.classList.toggle('sel',p==='rescate');
-  
-  if(p==='rescate'){
-    $('pwCta').textContent='Desbloquear por 0,99 € →';
-    $('pwLinea').textContent='Un diagnóstico completo para salvar tu planta ahora mismo.';
-  }else if(p==='anual'){
-    $('pwCta').textContent='Prueba Gratis →';
-    $('pwLinea').textContent='7 días gratis. Luego, 18,99 €/año (~1,58 €/mes)';
-  }else if(p==='mensual'){
-    $('pwCta').textContent='Continuar →';
-    $('pwLinea').textContent='1 mes por 1,99 €. Renovación mensual, cancela cuando quieras.';
-  }else{
-    $('pwCta').textContent='Comprar de por vida →';
-    $('pwLinea').textContent='Pago único de 35,99 €. Acceso Pro para siempre, sin renovaciones.';
-  }
-}
+// Paywall único definido en la sección de suscripciones.
+// Menú de planes antiguo retirado: ya no existen planAnual/pwCta/pwLinea.
 function activarPro(){mostrarToast('Los pagos todavía no están habilitados. No se ha activado ninguna suscripción.');}
 function restaurar(){mostrarToast(tier()==='free'?'No hay compras anteriores.':'✅ Membresía restaurada: '+tier())}
-function limpiarCache(){if(confirm('¿Borrar la caché de fotos de la guía?')){Object.keys(localStorage).filter(k=>k.startsWith('fs_wg_')).forEach(k=>localStorage.removeItem(k));location.reload();}}
+async function limpiarCache(){if(await ptConfirmar('¿Borrar la caché de fotos de la guía?')){Object.keys(localStorage).filter(k=>k.startsWith('fs_wg_')).forEach(k=>localStorage.removeItem(k));location.reload();}}
 // BORRAR TODO (Ajustes)
 async function borrarTodo() {
-  if (confirm('¿Eliminar TODOS tus datos (jardín, historial, suscripción y ajustes)? Esta acción no se puede deshacer.')) {
+  if (await ptConfirmar('¿Eliminar TODOS tus datos (jardín, historial, suscripción y ajustes)? Esta acción no se puede deshacer.')) {
     Object.keys(localStorage).filter(k => k.startsWith('fs_')).forEach(k => localStorage.removeItem(k));
     await DB.borrarTodo(); // Limpiar la base de datos de fotos completa
     await PT_HIST.vaciar(); // Eliminar también las consultas del historial
@@ -319,7 +298,7 @@ const copia=limpiarInterno(JSON.parse(JSON.stringify(p)));
 const b=new Blob([JSON.stringify(copia,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='plantorum_jardin.json';document.body.appendChild(a);a.click();document.body.removeChild(a);}
 function abrirLegal(t){$('legalTitulo').textContent=t==='priv'?'Política de privacidad':'Términos de uso';$('legalTexto').innerHTML=t==='priv'?LEGAL_PRIV:LEGAL_TERMS;$('modalLegal').classList.add('on');ptOverlayOpen('modalLegal');}
 function cerrarLegal(){$('modalLegal').classList.remove('on');ptOverlayClose('modalLegal');}
-const LEGAL_PRIV='<p>Plantorum procesa las fotos que subes únicamente para identificar la especie y generar el diagnóstico. Las imágenes se procesan mediante los servicios necesarios para la identificación y el análisis, y no se almacenan en nuestros servidores.</p><p>Tu jardín, historial, recordatorios y ajustes se guardan localmente en tu dispositivo. Puedes exportarlos o eliminarlos definitivamente desde Ajustes en cualquier momento (derechos RGPD).</p><p>No compartimos datos personales con terceros ni los usamos con fines publicitarios.</p>';
+const LEGAL_PRIV='<p>Al identificar o analizar una planta, su fotografía puede enviarse a proveedores externos para procesarla: Pl@ntNet (identificación), Google/Gemini (análisis) y Alibaba Cloud/Qwen (respaldo cuando proceda). Estas transferencias dependen del servicio utilizado y de las condiciones del proveedor.</p><p>Mi Jardín, el historial, el perfil y los recordatorios se guardan localmente en el dispositivo. Si se habilita el informe PDF, el servidor conserva temporalmente el documento generado, protegido mediante un enlace aleatorio, con acceso durante una hora; los documentos caducados se borran durante posteriores operaciones del servidor.</p><p>Los registros técnicos del servidor pueden contener información de diagnóstico sobre las consultas, pero no registran las fotografías completas en los mensajes habituales. Antes de publicar Plantorum se debe completar una política de privacidad con titular responsable, contacto, base jurídica, plazos de conservación, transferencias internacionales y ejercicio de derechos RGPD.</p>';
 const LEGAL_TERMS='<p>Plantorum ofrece información orientativa sobre identificación y cuidados de plantas. No sustituye el asesoramiento de un profesional de la jardinería o la fitosanidad.</p><p>Los planes Premium mostrados son una demostración de diseño. No se realizan cobros reales desde esta versión.</p><p>El uso de la app implica la aceptación de estas condiciones y de la política de privacidad.</p>';
 function claveUsoDiario(){
   const ahora = new Date();
@@ -410,6 +389,48 @@ async function prepararBlob(b) {
   }
 }
 
+// v110.1 — Progreso visual durante el diagnóstico, sin peticiones adicionales.
+// Estos mensajes describen la espera, NO porcentajes ni fases reales del servidor.
+let ptSaludTemporizador=null;
+const PT_SALUD_MENSAJES=[
+  ['Estamos comprobando la salud de su planta', 'Observando los detalles de la fotografía…'],
+  ['Estamos preparando el informe', 'Organizando la información y los cuidados…'],
+  ['Revisando las recomendaciones', 'Unos instantes más, por favor…']
+];
+function ptSaludProgresoMensaje(titulo,subtitulo){
+  const t=$('ptSaludProgresoTitulo'), s=$('ptSaludProgresoSubtitulo');
+  if(t)t.textContent=titulo;
+  if(s)s.textContent=subtitulo;
+}
+function ptSaludProgresoDetener(){
+  if(ptSaludTemporizador!==null){clearInterval(ptSaludTemporizador);ptSaludTemporizador=null;}
+  const wrap=$('resFotoWrap');
+  if(wrap)wrap.classList.remove('scanning','pt-salud-completado');
+  $('s-resultado')?.classList.remove('pt-salud-en-proceso');
+}
+function ptSaludProgresoIniciar(){
+  ptSaludProgresoDetener();
+  const wrap=$('resFotoWrap');
+  if(!wrap)return;
+  wrap.classList.add('scanning');
+  $('s-resultado')?.classList.add('pt-salud-en-proceso');
+  let paso=0;
+  ptSaludProgresoMensaje(...PT_SALUD_MENSAJES[0]);
+  ptSaludTemporizador=setInterval(()=>{
+    if(!wrap.classList.contains('scanning'))return ptSaludProgresoDetener();
+    paso=(paso+1)%PT_SALUD_MENSAJES.length;
+    ptSaludProgresoMensaje(...PT_SALUD_MENSAJES[paso]);
+  },3500);
+}
+async function ptSaludProgresoCompletar(){
+  if(ptSaludTemporizador!==null){clearInterval(ptSaludTemporizador);ptSaludTemporizador=null;}
+  const wrap=$('resFotoWrap');
+  if(!wrap)return;
+  wrap.classList.add('pt-salud-completado');
+  ptSaludProgresoMensaje('Escaneo completo', 'Ya tenemos el resultado de salud.');
+  await new Promise(resolve=>setTimeout(resolve,950));
+}
+
 async function analizar(blobO,continuacion=null,historialId=null,identificacionOriginal=null){
   if(!blobO) return;
   // La cuota se verifica en FastAPI, antes de consultar servicios externos.
@@ -425,7 +446,7 @@ async function analizar(blobO,continuacion=null,historialId=null,identificacionO
   // Mostrar pantalla de resultado con estado de carga
   show('resultado');
   $('resFoto').src=URL.createObjectURL(blob);
-  $('resFotoWrap').classList.add('scanning');
+  ptSaludProgresoIniciar();
   $('resNombre').textContent='Analizando...';
   $('resComun').textContent='';
   $('resAlerta').innerHTML='<span class="icon">⏳</span>Procesando imagen';
@@ -447,16 +468,20 @@ async function analizar(blobO,continuacion=null,historialId=null,identificacionO
       throw new Error(mensaje);
     }
     const d=await r.json();
+    // Solo mostramos «Escaneo completo» después de recibir un diagnóstico válido.
+    await ptSaludProgresoCompletar();
+    ptSaludProgresoDetener();
     // Cuota contabilizada en el servidor.
     pintar(d);
     await ptHistGuardarSalud(blob,d,historialId,identificacionOriginal);
   }catch(e){
-    $('resFotoWrap').classList.remove('scanning');
+    ptSaludProgresoDetener();
     $('resNombre').textContent='❌ Error';
     $('resComun').textContent=e.message;
     $('resAlerta').innerHTML='<span class="icon">❌</span>Error al analizar';
     $('resRecomendaciones').innerHTML='<p style="color:#F44336">No se pudo completar el análisis. Intenta de nuevo.</p>';
   }finally{
+    ptSaludProgresoDetener();
     analisisEnCurso = false;
   }
 }
@@ -570,15 +595,12 @@ async function pintarJardin() {
 
   await pintarRecientesPlantorum(p);
 
-  // Cargar imágenes desde IndexedDB de forma progresiva
-  for (const x of p) {
-    const imgEl = $(`img-planta-${x.id}`);
-    if (imgEl) {
-      // Compatibilidad previa: si la foto aún existía en localStorage, usarla; si no, buscar en IndexedDB
-      const foto = x.img || await DB.obtenerFoto(x.id);
-      if (foto) imgEl.src = foto;
-    }
-  }
+  // Lecturas independientes en paralelo: evita esperas secuenciales.
+  await Promise.all(p.map(async x => {
+    const foto=x.img || await DB.obtenerFoto(x.id);
+    const imgEl=$(`img-planta-${x.id}`);
+    if(foto && imgEl)imgEl.src=foto;
+  }));
 }
 
 
@@ -619,12 +641,15 @@ async function pintarRecientesPlantorum(plantas) {
 
 // ELIMINAR PLANTA
 async function eliminarPlanta(id) {
-  if (confirm('¿Eliminar planta?')) {
-    LS.set('plantas', LS.get('plantas', []).filter(x => x.id !== id));
-    await DB.eliminarFoto(id); // Limpiar foto en IndexedDB
-    pintarJardin();
-  }
+  const p=LS.get('plantas',[]).find(x=>x.id===id);
+  if(!p)return;
+  if(!await ptConfirmar('¿Eliminar esta planta y todas sus fotografías de evolución?'))return;
+  LS.set('plantas',LS.get('plantas',[]).filter(x=>x.id!==id));
+  await DB.eliminarFoto(id);
+  for(const foto of p.evolucion||[])await DB.eliminarFoto(foto.id);
+  await pintarJardin();comprobarAvisosRiego();
 }
+
 function regarPlanta(id) {
   const plantas = LS.get('plantas', []);
   const idx = plantas.findIndex(x => x.id === id);
@@ -719,6 +744,7 @@ async function verDetalle(id) {
       fetch(foto).then(r => r.blob()).then(b => ultimoBlob = b);
     }
 
+    modoJardin = 'view';
     pintar(p.data);
     show('resultado');
   }
@@ -727,7 +753,7 @@ async function verDetalle(id) {
   if (b2) b2.textContent = '🌿 Ver en Mi Jardín';
 }
 
-async function pedirInforme(){if(!ultimoBlob){mostrarToast('Primero escanea una planta.');return}if(tier()!=='pro'){if(!confirm('Informe detallado: 0,50 € (simulación). ¿Continuar?'))return}mostrarToast('Generando informe...');const fd=new FormData();fd.append('imagen',ultimoBlob,'foto.jpg');try{const r=await fetch('/informe',{method:'POST',body:fd});if(!r.ok)throw new Error('Error '+r.status);const d=await r.json();const a=document.createElement('a');a.href=d.url;a.download='informe_plantorum.pdf';document.body.appendChild(a);a.click();document.body.removeChild(a);mostrarToast('✅ Informe descargado')}catch(e){mostrarToast('Error informe: '+e.message)}}
+async function pedirInforme(){if(!ultimoBlob){mostrarToast('Primero escanea una planta.');return}if(tier()!=='pro'){mostrarToast('Los informes PDF estarán disponibles cuando se habiliten los pagos.');return;}mostrarToast('Generando informe...');const fd=new FormData();fd.append('imagen',ultimoBlob,'foto.jpg');try{const r=await fetch('/informe',{method:'POST',body:fd});if(!r.ok)throw new Error('Error '+r.status);const d=await r.json();const a=document.createElement('a');a.href=d.url;a.download='informe_plantorum.pdf';document.body.appendChild(a);a.click();document.body.removeChild(a);mostrarToast('✅ Informe descargado')}catch(e){mostrarToast('Error informe: '+e.message)}}
 
 const GUIAS=[
 {g:'De interior',n:'Potos',r:'Riega cuando esté seco arriba',l:'Luz indirecta',w:'Epipremnum aureum'},
@@ -816,7 +842,12 @@ function ptAbrirArticulo(i){const a=PT_GUIA_ARTICULOS[i];ptAbrirModalGuia(`<span
 function ptAbrirSintoma(i){const a=PT_GUIA_SINTOMAS[i];ptAbrirModalGuia(`<span class="pt-guide-eyebrow">ORIENTADOR DE SÍNTOMAS</span><h2>${ptEsc(a[0])}</h2><p>${ptEsc(a[1])}</p><p class="pt-guide-disclaimer">Estas son posibilidades, no un diagnóstico. Para evaluar una fotografía utiliza la función Analizar de Plantorum.</p>`);}
 function ptAbrirModalGuia(html){let el=$('ptGuiaModal');if(!el){el=document.createElement('div');el.id='ptGuiaModal';el.className='pt-guide-overlay';el.innerHTML='<section class="pt-guide-dialog" role="dialog" aria-modal="true" aria-label="Información de la guía"><button class="pt-guide-close" onclick="ptCerrarModalGuia()" aria-label="Cerrar">✕</button><div id="ptGuiaContenido"></div></section>';document.body.appendChild(el);el.addEventListener('click',e=>{if(e.target===el)ptCerrarModalGuia()});} $('ptGuiaContenido').innerHTML=html;el.hidden=false;document.body.style.overflow='hidden';ptOverlayOpen('ptGuiaModal');}
 function ptCerrarModalGuia(){const el=$('ptGuiaModal');if(el)el.hidden=true;document.body.style.overflow='';ptOverlayClose('ptGuiaModal');}
-async function fotoGuia(w,key){if(LS.get(key,''))return;try{const r=await fetch('https://es.wikipedia.org/api/rest_v1/page/summary/'+encodeURIComponent(w));if(!r.ok)return;const d=await r.json();const url=d.thumbnail&&d.thumbnail.source;if(!url)return;LS.set(key,url);const el=document.querySelector('[data-key="'+key+'"]');if(el){const img=new Image();img.className='pt-g-img';img.setAttribute('data-key',key);img.src=url;el.replaceWith(img);}}catch(e){}}
+const ptGuiaPendientes=new Set();
+const ptGuiaIntentados=new Set();
+async function fotoGuia(w,key){
+  if(LS.get(key,'')||ptGuiaPendientes.has(key)||ptGuiaIntentados.has(key))return;
+  ptGuiaPendientes.add(key);ptGuiaIntentados.add(key);
+  try{const r=await fetch('https://es.wikipedia.org/api/rest_v1/page/summary/'+encodeURIComponent(w));if(!r.ok)return;const d=await r.json();const url=d.thumbnail&&d.thumbnail.source;if(!url)return;LS.set(key,url);const el=document.querySelector('[data-key="'+key+'"]');if(el){const img=new Image();img.className='pt-g-img';img.setAttribute('data-key',key);img.src=url;el.replaceWith(img);}}catch(e){}finally{ptGuiaPendientes.delete(key);}}
 function datosEspecie(d){const e=d.especie||{};const pn=(e.plantnet&&e.plantnet[0])?e.plantnet[0]:null;const lo=(e.local&&e.local[0])?e.local[0]:null;
 let nom=e.nombre_comun||(pn?pn.nombre_comun:'');let cient=e.nombre_cientifico||(pn?pn.nombre_cientifico:'');
 if(!nom&&lo)nom=lo.clase;if(!nom||nom.toLowerCase()==='no identificada')nom='Planta';
@@ -937,11 +968,7 @@ function verificarBloqueo(){
   }
 }
 
-function abrirPaywallRescate(){
-  planElegido='rescate';
-  abrirPaywall();
-}
-
+// Rescate definido junto al paywall actual.
 async function compartirResultado() {
   const nombre = $('resNombre').textContent || 'esta planta';
   const texto = `¡Mira la planta que he identificado con Plantorum! 🌿 (${nombre})`;
@@ -1062,13 +1089,13 @@ function accionJardin(){
 }
 
 function iniciarCuenta(){
-  const num=$('spNum'),ring=$('spRing');
-  if(!num||!ring){
+  const num=$('spNum');
+  if(!num){
     if(spIntentos++>20){console.error('El splash nuevo no existe en el HTML');return;}
     setTimeout(iniciarCuenta,300);return;
   }
-  const C=540.4;let t=5;
-  num.textContent=t;ring.style.strokeDashoffset=C;
+  let t=5;
+  num.textContent=t;
   clearInterval(spTimer);
   spTimer=setInterval(()=>{
     const s=$('splash');
@@ -1076,7 +1103,6 @@ function iniciarCuenta(){
     t--;
     if(t<=0){clearInterval(spTimer);spTimer=null;saltarSplash('jardin');return;}
     num.textContent=t;
-    ring.style.strokeDashoffset=C*(1-(5-t)/5);
   },1000);
 }
 const _saltarOrig=saltarSplash;
@@ -1244,16 +1270,7 @@ async function eliminarFotoEvolucion(id){
   const plantas=LS.get('plantas',[]);const p=plantas.find(x=>x.id===ptEvoId);if(!p)return;
   p.evolucion=(p.evolucion||[]).filter(x=>x.id!==id);LS.set('plantas',plantas);await DB.eliminarFoto(id);await pintarEvolucion();
 }
-const ptEliminarOriginal=eliminarPlanta;
-eliminarPlanta=async function(id){
-  const p=LS.get('plantas',[]).find(x=>x.id===id);
-  // Se preserva el cuadro de confirmación del flujo existente.
-  if(!await ptConfirmar('¿Eliminar esta planta y todas sus fotografías de evolución?'))return;
-  LS.set('plantas',LS.get('plantas',[]).filter(x=>x.id!==id));
-  await DB.eliminarFoto(id);
-  for(const foto of p?.evolucion||[])await DB.eliminarFoto(foto.id);
-  pintarJardin();comprobarAvisosRiego();
-};
+// Eliminación unificada en eliminarPlanta().
 window.addEventListener('focus',comprobarAvisosRiego);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)comprobarAvisosRiego();});
 
@@ -1370,3 +1387,11 @@ function ptConfirmCerrar(ok){
 function ptConfirmCancelar(){ptConfirmCerrar(false);}
 $('ptConfirmNo')?.addEventListener('click',()=>ptConfirmCerrar(false));
 $('ptConfirmSi')?.addEventListener('click',()=>ptConfirmCerrar(true));
+
+// Plantorum 109 — accesibilidad de las tarjetas que aún usan onclick en HTML.
+document.addEventListener('DOMContentLoaded',()=>{
+ document.querySelectorAll('.pt-sub-plan[onclick],.pt-sub-method[onclick],.info-item[onclick]').forEach(el=>{
+   el.setAttribute('role','button');el.tabIndex=0;
+   el.addEventListener('keydown',ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();el.click();}});
+ });
+});

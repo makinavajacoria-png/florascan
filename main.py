@@ -59,7 +59,10 @@ PLANTNET_KEY = os.getenv("PLANTNET_API_KEY", "").strip()
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 QWEN_KEY = os.getenv("QWEN_API_KEY", "").strip()
 QWEN_BASE = os.getenv("QWEN_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1").rstrip("/")
-QWEN_MODELOS = [m.strip() for m in os.getenv("QWEN_MODELOS", "qwen/qwen2.5-vl-72b-instruct").split(",") if m.strip()]
+# DashScope usa IDs sin el prefijo "qwen/". Un valor manual en .env tiene prioridad.
+QWEN_MODELOS = [m.strip() for m in os.getenv("QWEN_MODELOS", "qwen2.5-vl-72b-instruct").split(",") if m.strip()]
+if "dashscope" in QWEN_BASE.lower():
+    QWEN_MODELOS = [m.removeprefix("qwen/") for m in QWEN_MODELOS]
 
 # ============================================================
 # EJECUTOR GLOBAL DE HILOS (Optimización de CPU en Render)
@@ -72,7 +75,7 @@ EXECUTOR = ThreadPoolExecutor(max_workers=4)
 MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(10 * 1024 * 1024)))  # 10 MB
 STATS_TOKEN = os.getenv("STATS_TOKEN", "").strip()
 
-app = FastAPI(title="Plantorum API", version="4.11")
+app = FastAPI(title="Plantorum API", version="4.12")
 
 
 
@@ -92,6 +95,9 @@ from http.cookies import SimpleCookie
 from threading import RLock
 
 QUOTA_DAILY_LIMIT = int(os.getenv("QUOTA_DAILY_LIMIT", "100"))
+# Cortafuegos de gasto compartido por todas las IP y dispositivos.
+# El límite es de consultas INICIADAS por día; no sustituye registro o CAPTCHA.
+QUOTA_GLOBAL_DAILY_LIMIT = int(os.getenv("QUOTA_GLOBAL_DAILY_LIMIT", "300"))
 # Límite por IP independiente y más alto: varias personas comparten IP (wifi, datos móviles) y no deben bloquearse entre sí.
 QUOTA_IP_LIMIT = max(QUOTA_DAILY_LIMIT, int(os.getenv("QUOTA_IP_LIMIT", "30")))
 QUOTA_DB_PATH = Path(os.getenv("QUOTA_DB_PATH", str(BASE / "plantorum_cuotas.sqlite3")))
@@ -155,6 +161,9 @@ def _quota_reserve(ip, device_id):
     day = datetime.datetime.now(QUOTA_TIMEZONE).strftime("%Y-%m-%d")
     keys = [("ip", _quota_hash("ip:" + ip)), ("device", _quota_hash("device-quota:" + device_id))]
     limites = {"ip": QUOTA_IP_LIMIT, "device": QUOTA_DAILY_LIMIT}
+    if QUOTA_GLOBAL_DAILY_LIMIT > 0:
+        keys.append(("global", _quota_hash("global:all-users")))
+        limites["global"] = QUOTA_GLOBAL_DAILY_LIMIT
     with QUOTA_LOCK:
         with sqlite3.connect(QUOTA_DB_PATH, timeout=15, isolation_level=None) as conn:
             conn.execute("PRAGMA busy_timeout=15000")
@@ -179,6 +188,8 @@ def _quota_refund(ip, device_id):
     """Devuelve la consulta cuando la petición falló (422/503...): el usuario no recibió resultado."""
     day = datetime.datetime.now(QUOTA_TIMEZONE).strftime("%Y-%m-%d")
     keys = [("ip", _quota_hash("ip:" + ip)), ("device", _quota_hash("device-quota:" + device_id))]
+    # No devolver la cuota global: incluso una respuesta 503 puede haber
+    # invocado una API de pago antes de fallar. Es un cortafuegos, no una cuota del usuario.
     try:
         with QUOTA_LOCK:
             with sqlite3.connect(QUOTA_DB_PATH, timeout=15) as conn:
@@ -233,25 +244,15 @@ async def proteger_cuotas(request: Request, call_next):
         raw = _quota_device_cookie()
         ident = raw.split(".", 1)[0]
     request.state.quota_device_id = ident
-    # Continuación firmada: la misma foto puede pasar de identificación a salud
-    # una sola vez, durante 15 minutos, sin gastar otra cuota.
+    # La continuación se verifica DENTRO de /analizar, con el UploadFile ya leído.
+    # No se toca request.body()/request.form() en el middleware: evita agotar streams.
+    # Una cabecera falsa recibe un 403 sin invocar APIs ni gastar cuota.
     if request.url.path == "/analizar" and request.headers.get("X-Plantorum-Continuation"):
-        try:
-            body = await request.body()
-            # Se valida el token sobre la foto subida, no sobre una cadena arbitraria.
-            from starlette.datastructures import UploadFile as StarletteUploadFile
-            form = await request.form()
-            uploaded = form.get('imagen')
-            photo = await uploaded.read() if isinstance(uploaded, StarletteUploadFile) else b''
-            if photo and _quota_redeem(request.headers.get("X-Plantorum-Continuation"), photo, _quota_ip(request), ident):
-                request.state.plantorum_prevalidated = True
-                response = await call_next(request)
-                if fresh:
-                    response.set_cookie(QUOTA_COOKIE, raw, max_age=365*86400, httponly=True, secure=request.url.scheme=="https", samesite="lax", path="/")
-                return response
-        except Exception as exc:
-            print(f"⚠️ Continuación no válida: {type(exc).__name__}")
-        # No aceptar una continuación inválida: aplica cuota normal.
+        response = await call_next(request)
+        if fresh:
+            response.set_cookie(QUOTA_COOKIE, raw, max_age=365*86400, httponly=True,
+                                secure=request.url.scheme == "https", samesite="lax", path="/")
+        return response
     try:
         permitido, restantes = _quota_reserve(_quota_ip(request), ident)
     except Exception as exc:
@@ -272,6 +273,16 @@ async def proteger_cuotas(request: Request, call_next):
     response.headers["X-Plantorum-Quota-Remaining"] = str(restantes)
     if fresh:
         response.set_cookie(QUOTA_COOKIE, raw, max_age=365*86400, httponly=True, secure=request.url.scheme=="https", samesite="lax", path="/")
+    return response
+
+@app.middleware("http")
+async def cabeceras_seguridad(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), payment=()"
+    # CSP estricta pendiente: el HTML actual tiene muchos onclick e imágenes data:.
     return response
 
 @app.middleware("http")
@@ -775,7 +786,9 @@ def texto_libre_como_respaldo(texto, especie_contexto, modelo_nombre):
 # GEMINI (principal)
 # ============================================================
 
-MODELOS_GEMINI = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash"]
+# Gemini 3.8 y 3.6 están documentados y ya han respondido en esta app.
+# 3.5 se ha retirado como nombre de endpoint; no reintroducirlo como fallback.
+MODELOS_GEMINI = [m.strip() for m in os.getenv("GEMINI_MODELOS", "gemini-3.8-flash,gemini-3.6-flash").split(",") if m.strip()]
 
 
 def _texto_de_respuesta_gemini(r):
@@ -1170,6 +1183,10 @@ def score_desde_estado(estado, confianza=0.7):
 # VALIDACIÓN DE ENTRADAS
 # ============================================================
 
+# Límites simultáneos en bytes y píxeles: protege también imágenes muy comprimidas.
+MAX_IMAGE_PIXELS = int(os.getenv("MAX_IMAGE_PIXELS", "20000000"))
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+
 async def leer_imagen_validada(upload: UploadFile) -> Image.Image:
     """Lee una imagen con límite de tamaño y valida que Pillow pueda decodificarla."""
     contenido = await upload.read(MAX_IMAGE_BYTES + 1)
@@ -1182,11 +1199,17 @@ async def leer_imagen_validada(upload: UploadFile) -> Image.Image:
         )
     try:
         imagen = Image.open(io.BytesIO(contenido))
+        if imagen.width * imagen.height > MAX_IMAGE_PIXELS:
+            raise HTTPException(413, "La fotografía tiene demasiados píxeles. Reduce su resolución.")
         imagen = ImageOps.exif_transpose(imagen)
         imagen.load()
         if imagen.mode not in ("RGB", "RGBA"):
             imagen = imagen.convert("RGB")
         return imagen
+    except HTTPException:
+        raise
+    except Image.DecompressionBombError:
+        raise HTTPException(413, "La fotografía tiene demasiados píxeles.")
     except Exception:
         raise HTTPException(status_code=400, detail="No se pudo leer la imagen. Usa JPG, PNG o WEBP.")
 
@@ -1400,6 +1423,18 @@ async def identificar_solo(request: Request, imagen: UploadFile = File(...)):
 
 @app.post("/analizar")
 async def analizar(request: Request, imagen: UploadFile = File(...)):
+    # El token solo se puede canjear por la misma imagen, IP y dispositivo.
+    # Se consume exactamente una vez. No leer el cuerpo en middleware.
+    token = request.headers.get("X-Plantorum-Continuation", "").strip()
+    if token:
+        foto = await imagen.read(MAX_IMAGE_BYTES + 1)
+        if not foto or len(foto) > MAX_IMAGE_BYTES:
+            raise HTTPException(413, "Fotografía demasiado grande o vacía.")
+        device = getattr(request.state, 'quota_device_id', '')
+        if not _quota_redeem(token, foto, _quota_ip(request), device):
+            raise HTTPException(403, "La continuación ya no es válida. Realiza una nueva identificación.")
+        request.state.plantorum_prevalidated = True
+        await imagen.seek(0)
     img = await leer_imagen_validada(imagen)
     # V105: si hay continuación validada, mantener la ruta anterior.
     # Si es acceso directo, la validación se hace DENTRO de la petición
@@ -1456,7 +1491,7 @@ async def analizar(request: Request, imagen: UploadFile = File(...)):
         fuente_ia = "gemini"
         ia = ia_gemini
         # Para la especie, lanzamos una identificación rápida si es posible o usamos lo de la IA
-        local = identificar_local(img)
+        local = await loop.run_in_executor(EXECUTOR, identificar_local, img)
         especie_contexto = ia.get("especie")
         cuidados = {
             "grupo": "Planta",
@@ -1616,7 +1651,28 @@ async def analizar(request: Request, imagen: UploadFile = File(...)):
 import uuid
 import datetime
 
-INFORMES = {}  # token -> PDF en memoria
+# SQLite permite recuperar informes tras reinicios y entre varios workers.
+# Mantener QUOTA_DB_PATH en almacenamiento persistente en Render.
+INFORME_TTL_SEGUNDOS = 3600
+INFORMES_ENABLED = os.getenv("INFORMES_ENABLED", "0") == "1"
+
+def _informe_init():
+    with sqlite3.connect(QUOTA_DB_PATH, timeout=15) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS informes_pdf (token TEXT PRIMARY KEY, pdf BLOB NOT NULL, expiry INTEGER NOT NULL)")
+
+def _informe_guardar(token, pdf):
+    with sqlite3.connect(QUOTA_DB_PATH, timeout=15) as conn:
+        conn.execute("DELETE FROM informes_pdf WHERE expiry < ?", (int(time.time()),))
+        conn.execute("INSERT INTO informes_pdf(token, pdf, expiry) VALUES (?,?,?)",
+                     (token, pdf, int(time.time())+INFORME_TTL_SEGUNDOS))
+
+def _informe_obtener(token):
+    with sqlite3.connect(QUOTA_DB_PATH, timeout=15) as conn:
+        conn.execute("DELETE FROM informes_pdf WHERE expiry < ?", (int(time.time()),))
+        row = conn.execute("SELECT pdf FROM informes_pdf WHERE token=? AND expiry>=?", (token, int(time.time()))).fetchone()
+    return row[0] if row else None
+
+_informe_init()
 
 PROMPT_INFORME = """Eres un botánico experto. Redacta un informe COMPLETO en español sobre la planta de la imagen.
 Devuelve SOLO JSON válido:
@@ -1640,31 +1696,54 @@ Máximo 2 frases por campo, 3 plagas, 3 enfermedades. Sin markdown."""
 def generar_informe_pdf(d):
     from fpdf import FPDF
     pdf = FPDF()
+    # No se distribuyen fuentes. Si el equipo tiene una TTF, se incrusta al
+    # generar el PDF; sin ella, Latin-1 conserva tildes y ñ, reemplaza emoji.
+    ttf = os.getenv("PDF_FONT_TTF", "")
+    if not ttf:
+        for candidato in (r"C:\Windows\Fonts\arial.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
+            if Path(candidato).is_file():
+                ttf = candidato
+                break
+    use_ttf = bool(ttf and Path(ttf).is_file())
+    if use_ttf:
+        pdf.add_font("Plantorum", "", ttf)
+        ttf_bold = os.getenv("PDF_FONT_BOLD_TTF", "")
+        if not ttf_bold:
+            ttf_bold = str(Path(ttf).with_name("DejaVuSans-Bold.ttf" if "DejaVu" in Path(ttf).name else "arialbd.ttf"))
+        if Path(ttf_bold).is_file():
+            pdf.add_font("Plantorum", "B", ttf_bold)
+        else:
+            pdf.add_font("Plantorum", "B", ttf)
+        pdf.add_font("Plantorum", "I", ttf)
+    fuente = "Plantorum" if use_ttf else "Helvetica"
+    def seguro(x):
+        s = str(x or "-")
+        return s if use_ttf else s.encode("latin-1", "replace").decode("latin-1")
     pdf.set_auto_page_break(auto=True, margin=18)
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 20)
+    pdf.set_font(fuente, "B", 20)
     pdf.set_text_color(18, 59, 44)
     pdf.cell(0, 12, "Plantorum - Informe detallado", ln=True, align="C")
-    pdf.set_font("Helvetica", "", 10)
+    pdf.set_font(fuente, "", 10)
     pdf.set_text_color(110, 118, 110)
     pdf.cell(0, 8, datetime.date.today().strftime("%d/%m/%Y"), ln=True, align="C")
     pdf.ln(4)
 
     def seccion(t):
-        pdf.set_font("Helvetica", "B", 13)
+        pdf.set_font(fuente, "B", 13)
         pdf.set_text_color(30, 158, 99)
         pdf.ln(3)
-        pdf.cell(0, 9, t, ln=True)
-        pdf.set_font("Helvetica", "", 11)
+        pdf.cell(0, 9, seguro(t), ln=True)
+        pdf.set_font(fuente, "", 11)
         pdf.set_text_color(40, 48, 40)
 
     def parr(t):
-        pdf.multi_cell(0, 6, t or "-")
+        pdf.multi_cell(0, 6, seguro(t))
         pdf.ln(1)
 
-    pdf.set_font("Helvetica", "B", 15)
+    pdf.set_font(fuente, "B", 15)
     pdf.set_text_color(18, 59, 44)
-    pdf.multi_cell(0, 9, d.get("especie", "Planta"), align="C")
+    pdf.multi_cell(0, 9, seguro(d.get("especie", "Planta")), align="C")
     pdf.ln(2)
     seccion("Descripcion"); parr(d.get("descripcion"))
     seccion("Luz"); parr(d.get("luz"))
@@ -1681,7 +1760,7 @@ def generar_informe_pdf(d):
     for x in d.get("calendario", []): parr("- " + x)
     seccion("Consejo del experto"); parr(d.get("consejo_experto"))
     pdf.ln(4)
-    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_font(fuente, "I", 9)
     pdf.set_text_color(140, 148, 140)
     pdf.multi_cell(0, 5, "Informe orientativo generado por IA. No sustituye el diagnostico de un profesional.")
     return pdf.output()
@@ -1729,27 +1808,34 @@ def informe_detallado_qwen(img):
 
 @app.post("/informe")
 async def informe(imagen: UploadFile = File(...)):
+    # Desactivado hasta tener cobro/autorización real; antes se podía gastar
+    # dinero en IA con un diálogo de pago que solo era una simulación.
+    if not INFORMES_ENABLED:
+        raise HTTPException(503, "Informes PDF temporalmente no disponibles.")
     img = await leer_imagen_validada(imagen)
-    datos = informe_detallado_gemini(img) or informe_detallado_qwen(img)
+    loop = asyncio.get_running_loop()
+    datos = await loop.run_in_executor(EXECUTOR, informe_detallado_gemini, img)
+    if not datos:
+        datos = await loop.run_in_executor(EXECUTOR, informe_detallado_qwen, img)
     if not datos:
         raise HTTPException(503, "La IA no está disponible ahora mismo. Inténtalo en unos minutos.")
+    pdf = bytes(await loop.run_in_executor(EXECUTOR, generar_informe_pdf, datos))
     token = uuid.uuid4().hex
-    INFORMES[token] = {"pdf": bytes(generar_informe_pdf(datos)), "ts": time.time()}
-    ahora = time.time()
-    for k in [k for k, v in INFORMES.items() if ahora - v["ts"] > 3600]:
-        del INFORMES[k]
+    _informe_guardar(token, pdf)
     _stats_contar("informes")
     return {"token": token, "url": f"/informe_pdf/{token}"}
-
 
 @app.get("/informe_pdf/{token}")
 def informe_pdf(token: str):
     from fastapi.responses import Response
-    item = INFORMES.get(token)
-    if not item:
+    if not re.fullmatch(r"[0-9a-f]{32}", token):
+        raise HTTPException(404, "Informe no encontrado")
+    pdf = _informe_obtener(token)
+    if not pdf:
         raise HTTPException(404, "El informe ha caducado. Vuelve a generarlo.")
-    return Response(content=item["pdf"], media_type="application/pdf",
-                    headers={"Content-Disposition": 'attachment; filename="informe_florascan.pdf"'})
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": 'attachment; filename="informe_plantorum.pdf"',
+                             "Cache-Control":"no-store"})
 
 # ============================================================
 # CONTADOR DE USO Y COSTES
@@ -1780,7 +1866,7 @@ def stats(x_stats_token: str = Header(default="", alias="X-Stats-Token")):
     # Este endpoint revela métricas internas. Debe configurarse STATS_TOKEN.
     if not STATS_TOKEN:
         raise HTTPException(status_code=404, detail="Endpoint no disponible.")
-    if x_stats_token != STATS_TOKEN:
+    if not hmac.compare_digest(x_stats_token, STATS_TOKEN):
         raise HTTPException(status_code=403, detail="No autorizado.")
     s = _stats_leer()
     coste = s.get("escaneos", 0) * 0.002 + s.get("informes", 0) * 0.004
@@ -1833,11 +1919,8 @@ def script():
 def raiz():
     return {
         "estado": "Plantorum API activa 🌿",
-        "version": "4.10",
-        "app": "/app", "docs": "/docs",
-        "gemini_configurado": bool(GEMINI_KEY),
-        "qwen_configurado": bool(QWEN_KEY),
-        "plantnet_configurado": bool(PLANTNET_KEY),
+        "version": app.version,
+        "app": "/app",
     }
 
 

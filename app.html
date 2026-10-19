@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Plantorum · Tu universo botánico</title>
 <!-- Plantorum v108.1: fotos decorativas embebidas; sin dependencias de /assets para la portada -->
-<link rel="stylesheet" href="/styles.css?v=10800">
+<link rel="stylesheet" href="/styles.css?v=11001">
 
 <!-- v106: ventana de identificación autosuficiente, incluso si styles.css está desactualizado -->
 <style>
@@ -68,7 +68,6 @@
   <div class="plantorum-splash-countdown"><span class="plantorum-splash-count-label">Comenzamos en</span><strong id="spNum">5</strong></div>
   <button class="plantorum-splash-skip" onclick="saltarSplash('jardin')">Entrar ahora →</button>
  </div>
- <svg aria-hidden="true" class="plantorum-splash-hidden" viewBox="0 0 200 200"><circle id="spRing" cx="100" cy="100" r="86"/></svg>
 </div>
 
 <!-- MI JARDÍN -->
@@ -150,7 +149,7 @@
     <div class="res-foto-wrap" id="resFotoWrap">
   <img id="resFoto" class="res-foto" src="" alt="">
   <div class="scan-line"></div>
-  <div class="scan-text">Analizando imagen...</div>
+  <div class="scan-text" role="status" aria-live="polite" aria-atomic="true"><span class="pt-salud-pulso" aria-hidden="true"></span><strong id="ptSaludProgresoTitulo">Estamos comprobando la salud de su planta</strong><span id="ptSaludProgresoSubtitulo">Observando los detalles de la fotografía…</span><span class="pt-salud-indicador" aria-hidden="true"><i></i><i></i><i></i></span></div>
 </div>
     
     <div class="pt-result-eyebrow">✦ ANÁLISIS BOTÁNICO</div><div class="res-info">
@@ -216,7 +215,7 @@
     <div class="info-item"><div class="icon">🌿</div><div class="content"><div class="title">Plantorum</div><div class="desc">Diseñado para amantes de las plantas</div></div></div>
     <div class="info-item" style="cursor:pointer" onclick="abrirLegal('priv')"><div class="icon">🔒</div><div class="content"><div class="title">Política de privacidad</div></div></div>
     <div class="info-item" style="cursor:pointer" onclick="abrirLegal('terms')"><div class="icon">📜</div><div class="content"><div class="title">Términos de uso</div></div></div>
-    <div class="info-item" style="cursor:pointer" ><div class="icon">✉️</div><div class="content"><div class="title">Contacto y soporte</div><div class="desc">Canal de soporte pendiente de configurar</div></div></div>
+    <div class="info-item"><div class="icon">✉️</div><div class="content"><div class="title">Contacto y soporte</div><div class="desc">Consulta los datos de contacto del responsable de Plantorum antes de contratar un servicio.</div></div></div>
   </div></div>
 </div>
 
@@ -306,7 +305,7 @@
 <nav>
   <button id="n-jardin" class="sel" onclick="show('jardin')"><svg viewBox="0 0 24 24"><path d="M6 10h12l-1.5 10h-9z"/><path d="M12 10c0-4 3-7 7-7 0 4-3 7-7 7z"/><path d="M12 10c0-2.5-2-4.5-4.5-4.5 0 2.5 2 4.5 4.5 4.5z"/></svg>Mi Jardín</button>
   <button id="n-guia" onclick="show('guia')"><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/></svg>Guía</button>
-  <button onclick="abrirCamara()"><span class="circ"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#fff" stroke-width="1.8"><path d="M5 21c0-9 7-16 14-16 0 9-7 16-14 16z"/><path d="M5 21C9 15 13 11 19 5"/></svg></span></button>
+  <button onclick="abrirCamara()" aria-label="Abrir cámara para escanear una planta"><span class="circ"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#fff" stroke-width="1.8"><path d="M5 21c0-9 7-16 14-16 0 9-7 16-14 16z"/><path d="M5 21C9 15 13 11 19 5"/></svg></span></button>
   <button onclick="abrirPaywall()"><svg viewBox="0 0 24 24"><path d="M3 17l2-9 5 5 2-7 2 7 5-5 2 9z"/><path d="M5 21h14"/></svg>Pro</button>
   <button id="n-ajustes" onclick="show('ajustes')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>Ajustes</button>
 </nav>
@@ -329,6 +328,6 @@
 <label class="pt-riego-label" for="ptRiegoFecha">Fecha del próximo aviso</label><input id="ptRiegoFecha" type="date">
 <p class="pt-riego-nota">El aviso aparece al abrir Plantorum o volver a ella cuando llegue la fecha. No se envía con la aplicación cerrada.</p>
 <button type="button" class="pt-riego-guardar" onclick="guardarConfiguracionRiego()">Guardar recordatorio</button>
-</section></div><div id="ptBienvenidaPerfil" class="pt-perfil-overlay" hidden><section class="pt-perfil-panel" role="dialog" aria-modal="true" aria-labelledby="ptBienvenidaTitulo"><div class="pt-perfil-leaf">🌿</div><h2 id="ptBienvenidaTitulo">¡Bienvenido a Plantorum!</h2><p>¿Cómo quieres que te llamemos?</p><form id="ptBienvenidaForm"><label for="ptBienvenidaNombre">Tu nombre (opcional)</label><input id="ptBienvenidaNombre" maxlength="40" autocomplete="nickname" placeholder="Escribe tu nombre"><button type="submit" class="btn btn-verde">Continuar</button></form><button type="button" id="ptBienvenidaOmitir" class="btn btn-suave">Ahora no</button><small>Puedes cambiarlo cuando quieras en Ajustes → Mi perfil.</small></section></div><div id="ptConfirmOverlay" class="pt-confirm-overlay" hidden><section class="pt-confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="ptConfirmTitulo" aria-describedby="ptConfirmTexto"><h2 id="ptConfirmTitulo">Confirmar acción</h2><p id="ptConfirmTexto"></p><div class="pt-confirm-actions"><button type="button" id="ptConfirmNo" class="btn btn-suave">Cancelar</button><button type="button" id="ptConfirmSi" class="btn btn-verde">Confirmar</button></div></section></div><script src="/app.js?v=10701"></script>
+</section></div><div id="ptBienvenidaPerfil" class="pt-perfil-overlay" hidden><section class="pt-perfil-panel" role="dialog" aria-modal="true" aria-labelledby="ptBienvenidaTitulo"><div class="pt-perfil-leaf">🌿</div><h2 id="ptBienvenidaTitulo">¡Bienvenido a Plantorum!</h2><p>¿Cómo quieres que te llamemos?</p><form id="ptBienvenidaForm"><label for="ptBienvenidaNombre">Tu nombre (opcional)</label><input id="ptBienvenidaNombre" maxlength="40" autocomplete="nickname" placeholder="Escribe tu nombre"><button type="submit" class="btn btn-verde">Continuar</button></form><button type="button" id="ptBienvenidaOmitir" class="btn btn-suave">Ahora no</button><small>Puedes cambiarlo cuando quieras en Ajustes → Mi perfil.</small></section></div><div id="ptConfirmOverlay" class="pt-confirm-overlay" hidden><section class="pt-confirm-box" role="alertdialog" aria-modal="true" aria-labelledby="ptConfirmTitulo" aria-describedby="ptConfirmTexto"><h2 id="ptConfirmTitulo">Confirmar acción</h2><p id="ptConfirmTexto"></p><div class="pt-confirm-actions"><button type="button" id="ptConfirmNo" class="btn btn-suave">Cancelar</button><button type="button" id="ptConfirmSi" class="btn btn-verde">Confirmar</button></div></section></div><script src="/app.js?v=11001"></script>
 </body>
 </html>
