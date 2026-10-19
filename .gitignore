@@ -1,0 +1,18 @@
+# Claves y configuración privada
+.env
+.env.*
+!.env.example
+*.secret
+
+# Bases de datos y estadísticas locales
+*.sqlite3
+*.sqlite3-*
+stats.json
+stats.json.tmp
+
+# Archivos temporales
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log
